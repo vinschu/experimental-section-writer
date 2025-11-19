@@ -1,0 +1,32 @@
+[
+  {
+    "id": "proc1",
+    "name": "Alkylation of N",
+    "description": "",
+    "template": "{C1} and {base} were dissolved in anhydrous {solvent}. The mixture was stirred for 2 h at r.t. and subsequently, {C2} was added. The reaction was stirred for 19 h at 130 °C. After cooling to r.t., it was diluted with {solvent2}, the phases were separated, and the aqueous layer was extracted with {solvent3}. The combined organic layers were dried over MgSO_4 and the solvent was removed under reduced pressure. The crude product was further purified via column chromatography (eluent: {solvent4}:{solvent5} = X:X, /R_f = X.XX) to obtain {product} as XXX."
+  },
+  {
+    "id": "proc3",
+    "name": "Suzuki Coupling",
+    "description": "",
+    "template": "{C1}, {C2} and {base} were dissolved in a mixture of {solvent}. The mixture was degassed via argon-bubbling for 0.5 h and subsequently {catalyst} was added. The reaction stirred for 20 h at 95°C. After cooling to r.t., it was diluted with {solvent2}, the phases were separated, and the aqueous layer was extracted with {solvent3}. The combined organic layers were dried over MgSO_4 and the solvent was removed under reduced pressure. The crude product was purified via column chromatography (eluent: {solvent4}:{solvent5} = X:X, /R_f = X.XX) to obtain {product} as XX."
+  },
+  {
+    "id": "proc4",
+    "name": "Borylation",
+    "description": "with n-BuLi",
+    "template": "{C1} was dissolved in anhydrous, degassed {solvent} (XX mL). The mixture was degassed via argon-bubbling and cooled to -78°C, then {BuLi} was added and the mixture was stirred for 2 h. Subsequently, {borester} was added. The reaction was allowed to get to r.t. and stirred for 18 h. The mixture was quenched with {solvent2}, the phases were separated, and the aqueous layer was extracted with {solvent3}. The combined organic layers were dried over MgSO_4, and the solvent was removed under reduced pressure. The crude product was further purified via column chromatography (eluent: {solvent4}:{solvent5} = X:X, /R_f = X.XX) to obtain {product} as XXX."
+  },
+  {
+    "id": "proc5",
+    "name": "[2+2+2] Trimerization",
+    "description": "",
+    "template": "{C1} and  were dissolved in dry, degassed {solvent} (XX mL). The reaction was stirred for XX h at 120 °C. After cooling to r.t., the solvent was removed under reduced pressure. The crude product was purified via column chromatography (eluent: {solvent4}:{solvent5} = X:X, /R_f = X.XX) and repurified by gel permeation chromatography (recGPC) to obtain {product} as XX."
+  },
+  {
+    "id": "proc6",
+    "name": "Miyaura Borylation",
+    "description": "",
+    "template": "{C1}, {C2} and {base} were dissolved in degassed, anhydrous {solvent} and subsequently {catalyst} was added. The reaction was stirred for {reaction_time} at {temperature}. After cooling to r.t., it was diluted with {solvent2}, the phases were separated, and the aqueous layer was extracted with {solvent3} (3 x). The organic layer was dried over MgSO_4 and the solvent removed under reduced pressure. The crude product was further purified via column chromatography (eluent: {solvent4}:{solvent5}= X:X, /R_f = X.XX) to obtain {product} as XX."
+  }
+]
