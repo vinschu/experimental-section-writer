@@ -1,13 +1,15 @@
-# -*- coding: utf-8 -*-+
-#test
+# -*- coding: utf-8 -*-
 """
 author: vinschu
-
+Modified: preview shows procedure at startup and updates immediately when a procedure is selected.
+Keeps previous features (dark theme, drag & drop, undo, button color customizations, etc.)
 """
 import sys
 import json
 import re
 import time
+import math
+from copy import deepcopy
 from pathlib import Path
 from PySide6 import QtWidgets, QtGui, QtCore
 from docx import Document
@@ -17,23 +19,97 @@ from docx.shared import Pt
 import xml.etree.ElementTree as ET
 import os
 import html as html_std
-import urllib.request
 import urllib.parse
+import urllib.request
 import urllib.error
 import socket
 
-# Standard-Datei-Pfade 
+# Standard-Datei-Pfade
 if getattr(sys, 'frozen', False):
-    # Wenn als EXE ausgeführt
     APP_DIR = Path(sys.executable).parent
 else:
-    # Wenn als .py ausgeführt
     APP_DIR = Path(__file__).parent.resolve()
 
 PROCEDURES_FILE = APP_DIR / "procedures.json"
 SOLVENTS_FILE = APP_DIR / "solvents.json"
 TRIVIALS_FILE = APP_DIR / "trivial_names.json"
 
+# Dark stylesheet applied at application level.
+# Main background darker, windows/dialogs and their inner areas slightly lighter and unified.
+DARK_STYLESHEET = """
+    QMainWindow { background: #070707; color: #ffffff; }
+    QWidget { color: #ffffff; background: #171717; }               /* unified inner window color */
+    QDialog, QFrame { background: #171717; color: #ffffff; border: 1px solid #2a2a2a; border-radius: 3px; }
+    QMenuBar { background: #070707; color: #ffffff; }
+    QMenuBar::item { background: transparent; color: #ffffff; }
+    QMenu { background: #111111; color: #ffffff; }
+
+    /* Lists & textareas: make preview same as other windows */
+    QListWidget { background: #1b1b1b; border: 1px solid #2a2a2a; color: #eaeaea; }
+    QTextEdit { background: #171717; border: 1px solid #2a2a2a; color: #eaeaea; }
+    QLineEdit, QPlainTextEdit { background: #1a1a1a; border: 1px solid #2a2a2a; color: #ffffff; }
+
+    /* Haupt-Button (blau) */
+    QPushButton {
+        background-color: #2d89ef;
+        color: white;
+        padding: 6px 10px;
+        border-radius: 4px;
+        border: 1px solid #2677d9;
+    }
+    QPushButton:hover {
+        background-color: #3b9ef8; /* etwas heller beim Hover */
+    }
+    QPushButton:pressed {
+        background-color: #1f6fcf; /* etwas dunkler beim Drücken */
+    }
+
+    /* Secondary-Buttons (grau, z.B. Manage, Copy Preview) */
+    QPushButton[secondary="true"] {
+        background-color: #6c757d;
+        color: white;
+        border: 1px solid #60666b;
+    }
+    QPushButton[secondary="true"]:hover {
+        background-color: #7a8085;
+    }
+    QPushButton[secondary="true"]:pressed {
+        background-color: #5a6165;
+    }
+
+    /* Undo (red) - objectName #undoBtn */
+    QPushButton#undoBtn {
+        background-color: #e74c3c;
+        color: white;
+        padding: 6px 10px;
+        border-radius: 4px;
+        border: 1px solid #c43b2a;
+    }
+    QPushButton#undoBtn:hover {
+        background-color: #ff6b5a;
+    }
+    QPushButton#undoBtn:pressed {
+        background-color: #c43b2a;
+    }
+
+    /* Edit Output (green) - objectName #editOutputBtn */
+    QPushButton#editOutputBtn {
+        background-color: #28a745;
+        color: white;
+        padding: 6px 10px;
+        border-radius: 4px;
+        border: 1px solid #1f7f34;
+    }
+    QPushButton#editOutputBtn:hover {
+        background-color: #36c05a;
+    }
+    QPushButton#editOutputBtn:pressed {
+        background-color: #1f7f34;
+    }
+
+    QLabel { font-weight: 600; color: #f1f1f1; }
+    QToolTip { background: #ffffff; color: #000000; }
+"""
 
 def load_procedures():
     if not PROCEDURES_FILE.exists():
@@ -145,7 +221,6 @@ def save_trivial_names(mapping):
 def extract_placeholders(template_text):
     return list(dict.fromkeys(re.findall(r"\{([a-zA-Z0-9_]+)\}", template_text)))
 
-
 # ---------------------------
 # Helpers: subscript mapping and others
 # ---------------------------
@@ -162,8 +237,6 @@ SUBSCRIPT_TRANSLATION = str.maketrans({
     "8": "₈",
     "9": "₉"
 })
-
-# Reverse mapping: Unicode subscript digits back to ASCII digits
 _UNICODE_SUB_TO_ASCII = {v: k for k, v in {
     "0": "₀",
     "1": "₁",
@@ -176,45 +249,23 @@ _UNICODE_SUB_TO_ASCII = {v: k for k, v in {
     "8": "₈",
     "9": "₉"
 }.items()}
-# Build a translation table for str.translate
 SUBSCRIPT_REVERSE_TRANSLATION = str.maketrans(_UNICODE_SUB_TO_ASCII)
-# Set for quick membership testing
 UNICODE_SUBSCRIPT_DIGITS = set(_UNICODE_SUB_TO_ASCII.keys())
 
-
 def subscript_digits(s: str) -> str:
-    """
-    Replace ASCII digits in s with Unicode subscript digits.
-    Only digits are transformed; letters, punctuation and spaces preserved.
-    Example: "C18H20" -> "C₁₈H₂₀"
-    """
     if not s:
         return s
     return s.translate(SUBSCRIPT_TRANSLATION)
 
-
 def remove_subscript_unicode(s: str) -> str:
-    """
-    Convert Unicode subscript digits back to ASCII digits.
-    Example: "C₁₈H₂₀" -> "C18H20"
-    """
     if not s:
         return s
     return s.translate(SUBSCRIPT_REVERSE_TRANSLATION)
 
-
 def normalize_commas_in_number_string(s: str) -> str:
-    """
-    Replace comma decimal separators with dots, but only where comma is between digits.
-    Examples:
-      '681,80 mg' -> '681.80 mg'
-      '2,06mmol'  -> '2.06mmol'
-      'C18H20BrN' -> unchanged
-    """
     if not s:
         return s
     return re.sub(r'(?<=\d),(?=\d)', '.', s)
-
 
 def is_zero_ml(s):
     if not s:
@@ -230,7 +281,6 @@ def is_zero_ml(s):
             return False
     return False
 
-
 def append_eq_if_present(s):
     if not s:
         return s
@@ -238,53 +288,30 @@ def append_eq_if_present(s):
         return s
     return f"{s} eq."
 
-
 def apply_subscript_markup_legacy(s: str) -> str:
-    """
-    Legacy helper that converts digit-markup to unicode digits (kept for compatibility).
-    """
     if not s:
         return s
-    # convert HTML-like <sub>123</sub> (case-insensitive)
     s = re.sub(r'(?i)<sub>\s*([0-9]+)\s*</sub>',
                lambda m: m.group(1).translate(SUBSCRIPT_TRANSLATION),
                s)
-    # convert _{123}
     s = re.sub(r'_\{\s*([0-9]+)\s*\}',
                lambda m: m.group(1).translate(SUBSCRIPT_TRANSLATION),
                s)
-    # convert _123
     s = re.sub(r'_([0-9]+)',
                lambda m: m.group(1).translate(SUBSCRIPT_TRANSLATION),
                s)
     return s
 
-
-# New: render markup to HTML for preview and copy. Handles:
-#   _x  and _{...}  -> subscript (wrap in <sub>...</sub>)
-#   /x  and /{...}  -> italic (wrap in <i>...</i>)
-#   existing <sub>...</sub> is preserved (case-insensitive)
 _MARKUP_RE = re.compile(
-    r'(?P<htmlsub><sub>.*?</sub>)'  # already HTML sub tag (non-greedy)
-    r'|_\{\s*([^}]+)\s*\}'          # _{...}  (group 2)
-    r'|_([A-Za-z0-9])'              # _x (group 3)
-    r'|/\{\s*([^}]+)\s*\}'          # /{...}  (group 4)
-    r'|/([A-Za-z0-9])',             # /x (group 5)
+    r'(?P<htmlsub><sub>.*?</sub>)'
+    r'|_\{\s*([^}]+)\s*\}'
+    r'|_([A-Za-z0-9])'
+    r'|/\{\s*([^}]+)\s*\}'
+    r'|/([A-Za-z0-9])',
     flags=re.IGNORECASE | re.DOTALL
 )
 
-
 def render_markup_to_html(s: str) -> str:
-    """
-    Convert markup in s to HTML. Returns HTML fragment (no <html> wrapper).
-    Examples:
-      H_2 -> H<sub>2</sub>
-      C_{18} -> C<sub>18</sub>
-      _f -> <sub>f</sub>
-      /R -> <i>R</i>
-      /{R} -> <i>R</i>
-      <sub>2</sub> (if present) preserved
-    """
     if s is None:
         return ""
     out = []
@@ -293,14 +320,12 @@ def render_markup_to_html(s: str) -> str:
         start, end = m.span()
         if start > last:
             out.append(html_std.escape(s[last:start]))
-        # groups: m.group(1) is htmlsub (if matched) else group2/group3/group4/group5
         htmlsub = m.group(1)
         brace_sub = m.group(2)
         single_sub = m.group(3)
         brace_i = m.group(4)
         single_i = m.group(5)
         if htmlsub:
-            # preserve inner content escaped
             inner = re.sub(r'(?i)^<sub>\s*', '', htmlsub)
             inner = re.sub(r'(?i)\s*</sub>$', '', inner)
             out.append(f"<sub>{html_std.escape(inner)}</sub>")
@@ -319,32 +344,19 @@ def render_markup_to_html(s: str) -> str:
         out.append(html_std.escape(s[last:]))
     return "".join(out)
 
-
 def strip_markup_to_plain_ascii(s: str) -> str:
-    """
-    Produce a plain-ASCII version by removing the markup characters.
-    _x -> x, _{...} -> ..., /x -> x, /{...} -> ...
-    Also strips any HTML <sub>/<i> tags if present in the literal text.
-    """
     if s is None:
         return ""
-    # replace <sub>..</sub> with inner
     s = re.sub(r'(?i)<sub>\s*([^<]+?)\s*</sub>', r'\1', s)
-    # replace <i>..</i>
     s = re.sub(r'(?i)<i>\s*([^<]+?)\s*</i>', r'\1', s)
-    # _{...} -> inner
     s = re.sub(r'_\{\s*([^}]+)\s*\}', r'\1', s)
-    # _x -> x
     s = re.sub(r'_([A-Za-z0-9])', r'\1', s)
-    # /{...} -> inner
     s = re.sub(r'/\{\s*([^}]+)\s*\}', r'\1', s)
-    # /x -> x
     s = re.sub(r'/([A-Za-z0-9])', r'\1', s)
     return s
 
-
 # ---------------------------
-# CDXML / stoichiometry parsing (component-wise)
+# CDXML parsing and helpers (unchanged)
 # ---------------------------
 
 def local_name(el):
@@ -353,12 +365,10 @@ def local_name(el):
         return tag.split("}", 1)[1]
     return tag
 
-
 def extract_text_elem(elem):
     if elem is None:
         return ""
     return "".join(elem.itertext()).strip()
-
 
 def parse_stoichiometry_components(cdxml_path):
     try:
@@ -366,7 +376,6 @@ def parse_stoichiometry_components(cdxml_path):
     except ET.ParseError as e:
         raise RuntimeError(f"XML parse error for {cdxml_path}: {e}")
     root = tree.getroot()
-
     stoich = None
     for el in root.iter():
         if isinstance(el.tag, str) and local_name(el).lower() == "stoichiometrygrid":
@@ -374,15 +383,12 @@ def parse_stoichiometry_components(cdxml_path):
             break
     if stoich is None:
         return []
-
     components = [c for c in stoich if local_name(c).lower() == "sgcomponent"]
     if not components:
         components = [el for el in stoich.iter() if local_name(el).lower() == "sgcomponent"]
     if not components:
         return []
-
     header_comp = next((c for c in components if (c.attrib.get("ComponentIsHeader") or "").lower() == "yes"), None)
-
     headers = []
     if header_comp is not None:
         sgdata_elems = [el for el in header_comp if local_name(el).lower() == "sgdatum"]
@@ -396,12 +402,9 @@ def parse_stoichiometry_components(cdxml_path):
             for sg in sgdata_elems:
                 t_elem = next((d for d in sg.iter() if local_name(d).lower() == "t"), None)
                 headers.append(extract_text_elem(t_elem) or "")
-
-    # exclude header component, then ignore the first non-header split
     data_components = [c for c in components if c is not header_comp]
     if len(data_components) > 0:
         data_components = data_components[1:]
-
     parsed = []
     for comp in data_components:
         sgdatums = [el for el in comp if local_name(el).lower() == "sgdatum"]
@@ -409,15 +412,12 @@ def parse_stoichiometry_components(cdxml_path):
         for sg in sgdatums:
             t_elem = next((d for d in sg.iter() if local_name(d).lower() == "t"), None)
             values.append(extract_text_elem(t_elem) or "")
-
         if len(values) < len(headers):
             values += [""] * (len(headers) - len(values))
-
         raw_fields = {}
         for i, hdr in enumerate(headers):
             key = (hdr or "").strip() or f"col_{i}"
             raw_fields[key] = values[i] if i < len(values) else ""
-
         formula = ""
         for k in raw_fields.keys():
             if k.strip().lower() == "formula":
@@ -425,9 +425,7 @@ def parse_stoichiometry_components(cdxml_path):
                 break
         if not formula and values:
             formula = values[0].strip()
-
         formula = re.sub(r'^[\s\-_\.0-9:()]+', '', formula).strip()
-
         if formula:
             parsed.append({
                 "formula": formula,
@@ -436,7 +434,6 @@ def parse_stoichiometry_components(cdxml_path):
                 "raw_fields": raw_fields
             })
     return parsed
-
 
 def find_cdxml_files(root_folder):
     cdxml_files = []
@@ -454,62 +451,106 @@ def find_cdxml_files(root_folder):
                         cdxml_files.append(full)
     return cdxml_files
 
-
 def format_component_display_by_index(component, is_last=False):
     vals = component.get("values", [])
-
     def safe(i):
         try:
             return (vals[i] or "").strip()
         except Exception:
             return ""
-
     row0 = safe(0)
     row4 = safe(4)
     row5 = safe(5)
     row9 = safe(9)
     row10 = safe(10)
-
-    # normalize numeric commas to dots where appropriate
     row0_disp = normalize_commas_in_number_string(row0)
     row4_disp = normalize_commas_in_number_string(row4)
     row5_disp = normalize_commas_in_number_string(row5)
     row9_disp = normalize_commas_in_number_string(row9)
     row10_disp = normalize_commas_in_number_string(row10)
-
-    # append " eq." to value[4] for display (if present)
     row4_eq_disp = append_eq_if_present(row4_disp) if row4_disp else ""
-
-    # choose value[9] if not zero-ml else fallback to value[5]
     chosen = row9_disp if (row9 and not is_zero_ml(row9)) else row5_disp
-
-    # formula handling: raw formula (for dedupe/ident) and subscripted formula for display
     formula_raw = component.get("formula", "").strip() or row0
     formula_raw = re.sub(r'^[\s\-_\.0-9:()]+', '', formula_raw).strip()
     formula_display = subscript_digits(formula_raw)
-
     if is_last:
-        # last split: only show the formula (no bracket)
         return {"formula": formula_raw, "display": formula_display, "details": {"row0": row0_disp}}
-
-    # Normal case: bracket order -> chosen (row9 or 5), row10, row4_eq
     bracket_parts = []
     for part in (chosen, row10_disp, row4_eq_disp):
         if part:
             bracket_parts.append(part)
     bracket = ", ".join(bracket_parts)
-
     if bracket:
         display = f"{formula_display} ({bracket})"
     else:
         display = formula_display
-
     return {"formula": formula_raw, "display": display, "details": {"chosen": chosen, "row10": row10_disp, "row4_eq": row4_eq_disp}}
 
+# ---------------------------
+# Draggable list widget: ensure plain-text mime during drag
+# ---------------------------
+
+class DraggableListWidget(QtWidgets.QListWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setDragEnabled(True)
+        self.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
+
+    def startDrag(self, supportedActions):
+        item = self.currentItem()
+        if not item:
+            return
+        mime = QtCore.QMimeData()
+        mime.setText(item.text())
+        drag = QtGui.QDrag(self)
+        drag.setMimeData(mime)
+        pix = QtGui.QPixmap(200, 20)
+        pix.fill(QtGui.QColor("#2a2a2a"))
+        painter = QtGui.QPainter(pix)
+        painter.setPen(QtGui.QColor("#ffffff"))
+        painter.drawText(6, 14, item.text()[:60])
+        painter.end()
+        drag.setPixmap(pix)
+        drag.exec(QtCore.Qt.CopyAction)
 
 # ---------------------------
-# Solvent editor & manager dialogs
-# (unchanged)
+# Preview text widget (accepts drops from lists)
+# ---------------------------
+
+class PreviewText(QtWidgets.QTextEdit):
+    dropped = QtCore.Signal(str, QtCore.QPoint)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setReadOnly(True)
+        self.setAcceptDrops(True)
+
+    def dragEnterEvent(self, event):
+        md = event.mimeData()
+        if md.hasText() or md.hasHtml():
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dragMoveEvent(self, event):
+        md = event.mimeData()
+        if md.hasText() or md.hasHtml():
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dropEvent(self, event):
+        md = event.mimeData()
+        if not (md.hasText() or md.hasHtml()):
+            event.ignore()
+            return
+        text = md.text() if md.hasText() else md.html()
+        pos = event.position().toPoint() if hasattr(event, 'position') else event.pos()
+        self.dropped.emit(text, pos)
+        event.acceptProposedAction()
+
+# ---------------------------
+# Remaining dialogs (inherit app stylesheet)
 # ---------------------------
 
 class SolventEditorDialog(QtWidgets.QDialog):
@@ -528,10 +569,8 @@ class SolventEditorDialog(QtWidgets.QDialog):
         layout.addWidget(btns)
         if solvent:
             self.name_edit.setText(solvent)
-
     def get_data(self):
         return self.name_edit.text().strip()
-
 
 class SolventManagerDialog(QtWidgets.QDialog):
     def __init__(self, parent=None, solvents=None):
@@ -543,7 +582,6 @@ class SolventManagerDialog(QtWidgets.QDialog):
         self.list_widget = QtWidgets.QListWidget()
         layout.addWidget(self.list_widget)
         self.refresh_list()
-
         btn_layout = QtWidgets.QHBoxLayout()
         add_btn = QtWidgets.QPushButton("Add")
         edit_btn = QtWidgets.QPushButton("Edit")
@@ -552,21 +590,16 @@ class SolventManagerDialog(QtWidgets.QDialog):
         btn_layout.addWidget(edit_btn)
         btn_layout.addWidget(del_btn)
         layout.addLayout(btn_layout)
-
         add_btn.clicked.connect(self.add_solvent)
         edit_btn.clicked.connect(self.edit_solvent)
         del_btn.clicked.connect(self.delete_solvent)
-
         close_btn = QtWidgets.QPushButton("Close")
         close_btn.clicked.connect(self.accept)
         layout.addWidget(close_btn)
-
     def refresh_list(self):
         self.list_widget.clear()
         for s in self.solvents:
-            # show subscripted in manager view for clarity
             self.list_widget.addItem(subscript_digits(s))
-
     def add_solvent(self):
         dlg = SolventEditorDialog(self)
         if dlg.exec() == QtWidgets.QDialog.Accepted:
@@ -574,7 +607,6 @@ class SolventManagerDialog(QtWidgets.QDialog):
             if val:
                 self.solvents.append(val)
                 self.refresh_list()
-
     def edit_solvent(self):
         item = self.list_widget.currentItem()
         if not item:
@@ -587,7 +619,6 @@ class SolventManagerDialog(QtWidgets.QDialog):
             if newv:
                 self.solvents[idx] = newv
                 self.refresh_list()
-
     def delete_solvent(self):
         item = self.list_widget.currentItem()
         if not item:
@@ -600,19 +631,12 @@ class SolventManagerDialog(QtWidgets.QDialog):
             del self.solvents[idx]
             self.refresh_list()
 
-
-# ---------------------------
-# Procedure editor & manager dialogs
-# (unchanged)
-# ---------------------------
-
 class ProcedureEditorDialog(QtWidgets.QDialog):
     def __init__(self, parent=None, procedure=None):
         super().__init__(parent)
         self.setWindowTitle("Procedure Editor")
         self.resize(700, 400)
         layout = QtWidgets.QVBoxLayout(self)
-
         form = QtWidgets.QFormLayout()
         self.name_edit = QtWidgets.QLineEdit()
         self.desc_edit = QtWidgets.QLineEdit()
@@ -620,9 +644,7 @@ class ProcedureEditorDialog(QtWidgets.QDialog):
         form.addRow("Name:", self.name_edit)
         form.addRow("Description:", self.desc_edit)
         form.addRow("Template (use {placeholders}):", self.template_edit)
-
         layout.addLayout(form)
-
         btns = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Save | QtWidgets.QDialogButtonBox.Cancel)
         save_btn = btns.button(QtWidgets.QDialogButtonBox.Save)
         cancel_btn = btns.button(QtWidgets.QDialogButtonBox.Cancel)
@@ -634,17 +656,13 @@ class ProcedureEditorDialog(QtWidgets.QDialog):
             cancel_btn.clicked.connect(self.reject)
         else:
             btns.rejected.connect(self.reject)
-
         layout.addWidget(btns)
-
         if procedure:
             self.name_edit.setText(procedure.get("name", ""))
             self.desc_edit.setText(procedure.get("description", ""))
             self.template_edit.setPlainText(procedure.get("template", ""))
-
     def on_save(self):
         self.accept()
-
     def get_data(self):
         return {
             "name": self.name_edit.text().strip(),
@@ -653,22 +671,14 @@ class ProcedureEditorDialog(QtWidgets.QDialog):
         }
 
 class ProcedureManagerDialog(QtWidgets.QDialog):
-    """
-    Manage procedures (add / edit / delete). Uses ProcedureEditorDialog for editing.
-    The dialog exposes `self.procedures` on accept (list of procedure dicts).
-    """
     def __init__(self, parent=None, procedures=None):
         super().__init__(parent)
         self.setWindowTitle("Manage Procedures")
         self.resize(800, 450)
-        # store a shallow copy so edits here don't immediately modify caller's list
         self.procedures = [dict(p) for p in (procedures or [])]
-
         layout = QtWidgets.QVBoxLayout(self)
-
         self.list_widget = QtWidgets.QListWidget()
         layout.addWidget(self.list_widget)
-
         btn_row = QtWidgets.QHBoxLayout()
         add_btn = QtWidgets.QPushButton("Add")
         edit_btn = QtWidgets.QPushButton("Edit")
@@ -680,16 +690,13 @@ class ProcedureManagerDialog(QtWidgets.QDialog):
         btn_row.addWidget(del_btn)
         btn_row.addWidget(up_btn)
         btn_row.addWidget(down_btn)
-        # spacer
         btn_row.addStretch()
         layout.addLayout(btn_row)
-
         add_btn.clicked.connect(self.add_procedure)
         edit_btn.clicked.connect(self.edit_procedure)
         del_btn.clicked.connect(self.delete_procedure)
         up_btn.clicked.connect(self.move_up)
         down_btn.clicked.connect(self.move_down)
-
         bottom = QtWidgets.QHBoxLayout()
         save_btn = QtWidgets.QPushButton("Save && Close")
         cancel_btn = QtWidgets.QPushButton("Cancel")
@@ -697,12 +704,9 @@ class ProcedureManagerDialog(QtWidgets.QDialog):
         bottom.addWidget(save_btn)
         bottom.addWidget(cancel_btn)
         layout.addLayout(bottom)
-
         save_btn.clicked.connect(self.accept)
         cancel_btn.clicked.connect(self.reject)
-
         self.refresh_list()
-
     def refresh_list(self):
         self.list_widget.clear()
         for p in self.procedures:
@@ -710,17 +714,14 @@ class ProcedureManagerDialog(QtWidgets.QDialog):
             desc = p.get("description", "")
             item = QtWidgets.QListWidgetItem(f"{name} — {desc}")
             self.list_widget.addItem(item)
-
     def add_procedure(self):
         dlg = ProcedureEditorDialog(self, procedure=None)
         if dlg.exec() == QtWidgets.QDialog.Accepted:
             data = dlg.get_data()
-            # generate a simple unique id using timestamp
             pid = f"proc{int(time.time() * 1000)}"
             entry = {"id": pid, "name": data.get("name", ""), "description": data.get("description", ""), "template": data.get("template", "")}
             self.procedures.append(entry)
             self.refresh_list()
-
     def edit_procedure(self):
         item = self.list_widget.currentItem()
         if not item:
@@ -735,7 +736,6 @@ class ProcedureManagerDialog(QtWidgets.QDialog):
             proc["template"] = data.get("template", proc.get("template", ""))
             self.procedures[idx] = proc
             self.refresh_list()
-
     def delete_procedure(self):
         item = self.list_widget.currentItem()
         if not item:
@@ -746,7 +746,6 @@ class ProcedureManagerDialog(QtWidgets.QDialog):
         if confirm == QtWidgets.QMessageBox.StandardButton.Yes:
             del self.procedures[idx]
             self.refresh_list()
-
     def move_up(self):
         idx = self.list_widget.currentRow()
         if idx <= 0:
@@ -754,7 +753,6 @@ class ProcedureManagerDialog(QtWidgets.QDialog):
         self.procedures[idx - 1], self.procedures[idx] = self.procedures[idx], self.procedures[idx - 1]
         self.refresh_list()
         self.list_widget.setCurrentRow(idx - 1)
-
     def move_down(self):
         idx = self.list_widget.currentRow()
         if idx < 0 or idx >= len(self.procedures) - 1:
@@ -763,24 +761,15 @@ class ProcedureManagerDialog(QtWidgets.QDialog):
         self.refresh_list()
         self.list_widget.setCurrentRow(idx + 1)
 
-# ---------------------------
-# New: Trivial Names manager dialog
-# ---------------------------
-
 class TrivialNamesManagerDialog(QtWidgets.QDialog):
-    """
-    Manage mapping from ASCII formula -> trivial name.
-    """
     def __init__(self, parent=None, mapping=None):
         super().__init__(parent)
         self.setWindowTitle("Manage Trivial Names")
         self.resize(600, 400)
         self.mapping = dict(mapping or {})
         layout = QtWidgets.QVBoxLayout(self)
-
         self.list_widget = QtWidgets.QListWidget()
         layout.addWidget(self.list_widget)
-
         btn_layout = QtWidgets.QHBoxLayout()
         add_btn = QtWidgets.QPushButton("Add")
         edit_btn = QtWidgets.QPushButton("Edit")
@@ -791,25 +780,19 @@ class TrivialNamesManagerDialog(QtWidgets.QDialog):
         btn_layout.addWidget(del_btn)
         btn_layout.addWidget(import_btn)
         layout.addLayout(btn_layout)
-
         add_btn.clicked.connect(self.add_entry)
         edit_btn.clicked.connect(self.edit_entry)
         del_btn.clicked.connect(self.delete_entry)
         import_btn.clicked.connect(self.import_json)
-
         close_btn = QtWidgets.QPushButton("Save && Close")
         close_btn.clicked.connect(self.accept)
         layout.addWidget(close_btn)
-
         self.refresh_list()
-
     def refresh_list(self):
         self.list_widget.clear()
-        # show keys with subscripted digits for readability
         for k, v in sorted(self.mapping.items(), key=lambda x: x[0]):
             disp_key = subscript_digits(k)
             self.list_widget.addItem(f"{disp_key} → {v}")
-
     def add_entry(self):
         dlg = QtWidgets.QDialog(self)
         dlg.setWindowTitle("Add trivial name")
@@ -829,7 +812,6 @@ class TrivialNamesManagerDialog(QtWidgets.QDialog):
                 f_norm = remove_subscript_unicode(strip_markup_to_plain_ascii(f)).strip()
                 self.mapping[f_norm] = n
                 self.refresh_list()
-
     def edit_entry(self):
         item = self.list_widget.currentItem()
         if not item:
@@ -853,12 +835,10 @@ class TrivialNamesManagerDialog(QtWidgets.QDialog):
             n = name_edit.text().strip()
             if f:
                 f_norm = remove_subscript_unicode(strip_markup_to_plain_ascii(f)).strip()
-                # remove old key if changed
                 if f_norm != key and key in self.mapping:
                     del self.mapping[key]
                 self.mapping[f_norm] = n
                 self.refresh_list()
-
     def delete_entry(self):
         item = self.list_widget.currentItem()
         if not item:
@@ -869,7 +849,6 @@ class TrivialNamesManagerDialog(QtWidgets.QDialog):
         if confirm == QtWidgets.QMessageBox.StandardButton.Yes:
             del self.mapping[key]
             self.refresh_list()
-
     def import_json(self):
         fpath, _ = QtWidgets.QFileDialog.getOpenFileName(self, "Import trivial names JSON", str(Path.cwd()), "JSON files (*.json);;All files (*)")
         if not fpath:
@@ -886,70 +865,88 @@ class TrivialNamesManagerDialog(QtWidgets.QDialog):
         except Exception as e:
             QtWidgets.QMessageBox.critical(self, "Error", f"Failed to import: {e}")
 
-
-
-# ---------------------------
-# Edit Output dialog (unchanged)
-# ---------------------------
-
 class EditOutputDialog(QtWidgets.QDialog):
-    """
-    Dialog that allows the user to edit the rendered markup.
-    The content edited here is stored temporarily (not written into the procedure templates).
-    """
     def __init__(self, parent=None, initial_markup=""):
         super().__init__(parent)
         self.setWindowTitle("Edit Output (temporary)")
         self.resize(700, 400)
         layout = QtWidgets.QVBoxLayout(self)
-
         self.editor = QtWidgets.QPlainTextEdit()
-        # show the raw markup so user can edit subscripts (/ and _ not rendered)
         self.editor.setPlainText(initial_markup or "")
         layout.addWidget(self.editor)
-
         btns = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Save | QtWidgets.QDialogButtonBox.Cancel)
         btns.accepted.connect(self.accept)
         btns.rejected.connect(self.reject)
         layout.addWidget(btns)
-
     def get_text(self):
         return self.editor.toPlainText()
 
-
-# ---------------------------
-# Drop area for files/folders (main window)
-# ---------------------------
+class AssignedMappingDialog(QtWidgets.QDialog):
+    def __init__(self, parent=None, placeholders=None, mapping=None):
+        super().__init__(parent)
+        self.setWindowTitle("Assigned Mapping")
+        self.resize(500, 350)
+        self.placeholders = list(placeholders or [])
+        self.mapping = dict(mapping or {})
+        layout = QtWidgets.QVBoxLayout(self)
+        self.list_widget = QtWidgets.QListWidget()
+        layout.addWidget(self.list_widget)
+        btn_row = QtWidgets.QHBoxLayout()
+        unassign_btn = QtWidgets.QPushButton("Unassign Selected")
+        copy_btn = QtWidgets.QPushButton("Copy to Clipboard")
+        btn_row.addWidget(unassign_btn)
+        btn_row.addWidget(copy_btn)
+        btn_row.addStretch()
+        layout.addLayout(btn_row)
+        close_btn = QtWidgets.QPushButton("Close")
+        close_btn.clicked.connect(self.accept)
+        layout.addWidget(close_btn)
+        unassign_btn.clicked.connect(self.unassign_selected)
+        copy_btn.clicked.connect(self.copy_to_clipboard)
+        self.refresh_list()
+    def refresh_list(self):
+        self.list_widget.clear()
+        for ph in self.placeholders:
+            val = self.mapping.get(ph, "")
+            li = QtWidgets.QListWidgetItem(f"{ph} → {val or '<unassigned>'}")
+            self.list_widget.addItem(li)
+    def unassign_selected(self):
+        item = self.list_widget.currentItem()
+        if not item:
+            return
+        idx = self.list_widget.currentRow()
+        ph = self.placeholders[idx]
+        if ph in self.mapping:
+            del self.mapping[ph]
+        self.refresh_list()
+    def copy_to_clipboard(self):
+        lines = []
+        for ph in self.placeholders:
+            val = self.mapping.get(ph, "")
+            lines.append(f"{ph} -> {val or ''}")
+        cb = QtWidgets.QApplication.clipboard()
+        cb.setText("\n".join(lines))
 
 class DropArea(QtWidgets.QWidget):
-    """
-    Accepts file/dir drops. Emits signal with list of local paths.
-    """
     filesDropped = QtCore.Signal(list)
-
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setAcceptDrops(True)
-        # optional visual hint
         self.setAutoFillBackground(True)
         pal = self.palette()
-        # keep default background; visual hint not intrusive
         self.setPalette(pal)
-
     def dragEnterEvent(self, event):
         md = event.mimeData()
         if md.hasUrls():
             event.acceptProposedAction()
         else:
             event.ignore()
-
     def dragMoveEvent(self, event):
         md = event.mimeData()
         if md.hasUrls():
             event.acceptProposedAction()
         else:
             event.ignore()
-
     def dropEvent(self, event):
         md = event.mimeData()
         if not md.hasUrls():
@@ -966,126 +963,150 @@ class DropArea(QtWidgets.QWidget):
         else:
             event.ignore()
 
-
-
-# ---------------------------
-# Main window
-# ---------------------------
-
 class MainWindow(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Experimental Section Writer")
-        self.resize(1000, 700)
+        self.resize(1100, 760)
         self.procedures = load_procedures()
         self.solvents = load_solvents()
         self.trivial_names = load_trivial_names()
         self.chemicals = []
         self.mapping = {}
         self.last_rendered_markup = ""
-
+        self.current_template = ""
+        self.preview_font_pt = None
+        # history of (mapping, last_rendered_markup)
+        self.state_history = []
+        self.history_limit = 50
         self.setup_ui()
 
+    def push_state(self):
+        # store a deep copy of mapping and the last rendered markup
+        snap = (deepcopy(self.mapping), str(self.last_rendered_markup))
+        self.state_history.append(snap)
+        if len(self.state_history) > self.history_limit:
+            self.state_history.pop(0)
+
+    def undo_last_action(self):
+        if not self.state_history:
+            QtWidgets.QMessageBox.information(self, "Undo", "Nothing to undo.")
+            return
+        last_map, last_markup = self.state_history.pop()
+        self.mapping = deepcopy(last_map)
+        self.last_rendered_markup = str(last_markup)
+        # update preview based on restored markup
+        self.update_preview_from_markup(self.last_rendered_markup)
+        self.refresh_mapping_list()
+        self.statusBar().showMessage("Undo applied", 3000)
+
     def setup_ui(self):
-        # Menu
         men = self.menuBar()
         file_menu = men.addMenu("File")
         load_act = QtGui.QAction("Load CDMXL...", self)
         load_act.triggered.connect(self.load_cdmxl)
         file_menu.addAction(load_act)
-
         procedures_menu = men.addMenu("Procedures")
         manage_act = QtGui.QAction("Manage Procedures...", self)
         manage_act.triggered.connect(self.open_procedure_manager)
         procedures_menu.addAction(manage_act)
-
-        # Add a top-level "Solvents" action to the menu bar (opens solvent manager)
         solvents_act = QtGui.QAction("Solvents", self)
         solvents_act.triggered.connect(self.open_solvent_manager)
         men.addAction(solvents_act)
-
-        # New: Names menu for trivial names management
         names_menu = men.addMenu("Names")
         manage_triv_act = QtGui.QAction("Manage Trivial Names...", self)
         manage_triv_act.triggered.connect(self.open_trivial_names_manager)
         names_menu.addAction(manage_triv_act)
+        view_menu = men.addMenu("View")
+        assigned_mapping_act = QtGui.QAction("Assigned Mapping...", self)
+        assigned_mapping_act.triggered.connect(self.open_assigned_mapping_dialog)
+        view_menu.addAction(assigned_mapping_act)
 
-        # Central widget: use DropArea so user can drop files/folders onto entire main area
         central = DropArea(self)
         central.filesDropped.connect(self.load_cdxml_paths)
         self.setCentralWidget(central)
         layout = QtWidgets.QHBoxLayout(central)
+        layout.setContentsMargins(8, 8, 8, 8)
 
-        left = QtWidgets.QVBoxLayout()
-        right = QtWidgets.QVBoxLayout()
+        left_frame = QtWidgets.QFrame()
+        left_frame.setFrameShape(QtWidgets.QFrame.StyledPanel)
+        left_frame.setMinimumWidth(300)
+        left_layout = QtWidgets.QVBoxLayout(left_frame)
+        left_layout.setSpacing(10)
 
-        # Chemicals list
-        left.addWidget(QtWidgets.QLabel("Chemicals (from CDMXL)"))
-        self.chem_list = QtWidgets.QListWidget()
-        left.addWidget(self.chem_list)
+        left_layout.addWidget(QtWidgets.QLabel("Chemicals (from CDXML)"))
+        self.chem_list = DraggableListWidget()
+        left_layout.addWidget(self.chem_list, 3)
 
-        # Solvents list under chemicals
-        left.addWidget(QtWidgets.QLabel("Solvents"))
-        solv_h = QtWidgets.QHBoxLayout()
-        self.solv_list = QtWidgets.QListWidget()
-        solv_h.addWidget(self.solv_list, 1)
-        left.addLayout(solv_h)
-        self.refresh_solvents_list()
+        left_layout.addWidget(QtWidgets.QLabel("Solvents"))
+        self.solv_list = DraggableListWidget()
+        left_layout.addWidget(self.solv_list, 1)
 
-        # Right side: procedures / placeholders / preview
-        right_top = QtWidgets.QVBoxLayout()
-        proc_h = QtWidgets.QHBoxLayout()
-        proc_h.addWidget(QtWidgets.QLabel("Procedure:"))
+        # Bottom-left Load button removed per request; keep only Manage button
+        left_btn_row = QtWidgets.QHBoxLayout()
+        manage_solvents_btn = QtWidgets.QPushButton("Manage")
+        manage_solvents_btn.setProperty("secondary", True)
+        manage_solvents_btn.clicked.connect(self.open_solvent_manager)
+        left_btn_row.addWidget(manage_solvents_btn)
+        left_layout.addLayout(left_btn_row)
+
+        right_frame = QtWidgets.QFrame()
+        right_frame.setFrameShape(QtWidgets.QFrame.StyledPanel)
+        right_layout = QtWidgets.QVBoxLayout(right_frame)
+        right_layout.setSpacing(8)
+
+        proc_row = QtWidgets.QHBoxLayout()
+        proc_row.addWidget(QtWidgets.QLabel("Procedure:"))
         self.proc_combo = QtWidgets.QComboBox()
-        proc_h.addWidget(self.proc_combo)
-
-        # ====== RESTORED BUTTONS (Load) placed next to procedure combo ======
-        # These are visible UI buttons (in addition to menu actions) requested by the user.
-        # They call the same methods that the menu/actions use, so behavior is unchanged.
-        spacer = QtWidgets.QWidget()
-        spacer.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Preferred)
-        proc_h.addWidget(spacer)
-
-        load_btn = QtWidgets.QPushButton("Load")
-        load_btn.setToolTip("Load CDMXL files or folders (same as File → Load CDMXL...)")
-        load_btn.clicked.connect(self.load_cdmxl)
-        proc_h.addWidget(load_btn)
-
-       
-        # =======================================================================================
-
-        right_top.addLayout(proc_h)
-
-        # Create placeholders and mapping widgets first to ensure on_proc_changed can safely access mapping_list
-        right_top.addWidget(QtWidgets.QLabel("Placeholders (click to assign)"))
-        self.placeholders_list = QtWidgets.QListWidget()
-        self.placeholders_list.itemClicked.connect(self.on_placeholder_clicked)
-        right_top.addWidget(self.placeholders_list)
-
-        right_top.addWidget(QtWidgets.QLabel("Assigned mapping"))
-        self.mapping_list = QtWidgets.QListWidget()
-        right_top.addWidget(self.mapping_list)
-
-        # Now connect the combo and load procedures (safe because placeholders/mapping exist)
+        # Verbindung hinzufügen: bei Auswahländerung sofort on_proc_changed aufrufen
         self.proc_combo.currentIndexChanged.connect(self.on_proc_changed)
-        self.reload_procedures()
+        proc_row.addWidget(self.proc_combo, 1)
 
-        right.addLayout(right_top)
+        load_btn2 = QtWidgets.QPushButton("Load")
+        load_btn2.setToolTip("Load CDMXL files or folders")
+        load_btn2.clicked.connect(self.load_cdmxl)
+        proc_row.addWidget(load_btn2)
 
-        # Preview and export
+        right_layout.addLayout(proc_row)
+
+        right_layout.addWidget(QtWidgets.QLabel("Placeholders (click to assign)"))
+        self.placeholders_list = QtWidgets.QListWidget()
+        # Make placeholder area larger per user request
+        self.placeholders_list.setMinimumHeight(180)
+        self.placeholders_list.setMaximumHeight(280)
+        self.placeholders_list.itemClicked.connect(self.on_placeholder_clicked)
+        right_layout.addWidget(self.placeholders_list)
+
         preview_lbl = QtWidgets.QLabel("Preview")
-        right.addWidget(preview_lbl)
-        self.preview = QtWidgets.QTextEdit()
-        self.preview.setReadOnly(True)
-        right.addWidget(self.preview, 1)
+        right_layout.addWidget(preview_lbl)
+        self.preview = PreviewText()
+        font = self.preview.font()
+        base = font.pointSize()
+        if base <= 0:
+            base = QtWidgets.QApplication.font().pointSize()
+            if base <= 0:
+                base = 12
+        font.setPointSize(base + 2)
+        self.preview.setFont(font)
+        self.preview_font_pt = base + 2
+        # ensure objectNames for styled buttons (set later when creating buttons)
+        self.preview.dropped.connect(self.on_preview_dropped)
+        right_layout.addWidget(self.preview, 1)
 
         bottom_h = QtWidgets.QHBoxLayout()
-        # Keep the bottom buttons too (they were present previously). They still call the same methods:
         preview_btn = QtWidgets.QPushButton("Render Preview")
         preview_btn.clicked.connect(self.render_preview)
         bottom_h.addWidget(preview_btn)
 
+        # Undo button (objectName used for styling)
+        undo_btn = QtWidgets.QPushButton("Undo")
+        undo_btn.setObjectName("undoBtn")
+        undo_btn.clicked.connect(self.undo_last_action)
+        bottom_h.addWidget(undo_btn)
+
         copy_preview_btn = QtWidgets.QPushButton("Copy Preview")
+        # copy preview grey - same as Manage button (uses secondary)
+        copy_preview_btn.setProperty("secondary", True)
         copy_preview_btn.clicked.connect(self.copy_preview_to_clipboard)
         bottom_h.addWidget(copy_preview_btn)
 
@@ -1093,28 +1114,38 @@ class MainWindow(QtWidgets.QMainWindow):
         export_word_btn.clicked.connect(self.export_word)
         bottom_h.addWidget(export_word_btn)
 
-        # New: Edit Output button (temporary edit of last rendered markup)
         edit_output_btn = QtWidgets.QPushButton("Edit Output")
-        edit_output_btn.setToolTip("Edit the generated output text (temporary). Save to update the preview; changes are not written to procedures.")
+        # set objectName for centralized styling
+        edit_output_btn.setObjectName("editOutputBtn")
+        edit_output_btn.setToolTip("Edit the generated output text (temporary).")
         edit_output_btn.clicked.connect(self.open_edit_output_dialog)
         bottom_h.addWidget(edit_output_btn)
 
-        # NEW: Convert Names button
         convert_btn = QtWidgets.QPushButton("Convert Names")
-        convert_btn.setToolTip("Convert chemical formulas in the preview to trivial names (from file) or IUPAC (PubChem fallback).")
+        convert_btn.setToolTip("Convert chemical formulas in the preview using trivial_names.json only (no network).")
         convert_btn.clicked.connect(self.convert_preview_formulas_to_names)
         bottom_h.addWidget(convert_btn)
 
-        right.addLayout(bottom_h)
+        for b in (export_word_btn, edit_output_btn):
+            b.setProperty("secondary", False)
 
-        layout.addLayout(left, 1)
-        layout.addLayout(right, 2)
+        right_layout.addLayout(bottom_h)
+
+        splitter = QtWidgets.QSplitter(QtCore.Qt.Horizontal)
+        splitter.addWidget(left_frame)
+        splitter.addWidget(right_frame)
+        splitter.setStretchFactor(0, 0)
+        splitter.setStretchFactor(1, 1)
+        layout.addWidget(splitter, 1)
 
         status = QtWidgets.QLabel("")
         self.statusBar().addWidget(status)
 
+        self.reload_procedures()
+        self.refresh_solvents_list()
+
     # ---------------------------
-    # Loading CDXML files (from dialog or drag/drop) - centralised
+    # Loading CDXML files (unchanged)
     # ---------------------------
 
     def load_cdmxl(self):
@@ -1123,7 +1154,6 @@ class MainWindow(QtWidgets.QMainWindow):
             "CDMXL Files (*.cdxml *.xml);;All files (*)"
         )
         if fpath:
-            # single file chosen
             self.load_cdxml_paths([fpath])
             return
 
@@ -1133,10 +1163,6 @@ class MainWindow(QtWidgets.QMainWindow):
         self.load_cdxml_paths([folder])
 
     def load_cdxml_paths(self, paths):
-        """
-        Accept a list of filesystem paths (files or directories). Resolve to a list of files
-        to parse, then parse and populate the chemicals list exactly like the previous dialog flow.
-        """
         to_parse = []
         for p in paths:
             if os.path.isfile(p):
@@ -1145,12 +1171,10 @@ class MainWindow(QtWidgets.QMainWindow):
                 found = find_cdxml_files(p)
                 if found:
                     to_parse.extend(found)
-        # dedupe
         to_parse = list(dict.fromkeys(to_parse))
         if not to_parse:
             QtWidgets.QMessageBox.information(self, "No files", "No CDXML/XML files found in the dropped items.")
             return
-
         components_all = []
         for file in to_parse:
             try:
@@ -1159,7 +1183,6 @@ class MainWindow(QtWidgets.QMainWindow):
                 comps = []
             if comps:
                 components_all.extend(comps)
-
         candidates = []
         for idx, comp in enumerate(components_all):
             is_last = (idx == len(components_all) - 1)
@@ -1167,10 +1190,9 @@ class MainWindow(QtWidgets.QMainWindow):
             if not formatted["formula"]:
                 continue
             candidates.append({
-                "formula": formatted["formula"],  # raw for dedupe
-                "display": formatted["display"]   # subscripted display
+                "formula": formatted["formula"],
+                "display": formatted["display"]
             })
-
         seen = set()
         normalized = []
         for c in candidates:
@@ -1182,21 +1204,14 @@ class MainWindow(QtWidgets.QMainWindow):
                 continue
             seen.add(key)
             normalized.append(c)
-
         if not normalized:
             QtWidgets.QMessageBox.information(self, "No chemicals", "No candidate chemicals found in the selected file(s).")
             return
-
         self.chemicals = normalized
         self.chem_list.clear()
         for c in self.chemicals:
             self.chem_list.addItem(c["display"])
-        # update status bar (silent confirmation)
         self.statusBar().showMessage(f"Loaded {len(self.chemicals)} candidate chemicals", 5000)
-
-    # ---------------------------
-    # Rest of main window methods (placeholders, preview, copy/export etc.)
-    # ---------------------------
 
     def refresh_solvents_list(self):
         self.solv_list.clear()
@@ -1215,8 +1230,9 @@ class MainWindow(QtWidgets.QMainWindow):
         for p in self.procedures:
             name = p.get("name") or "<no name>"
             self.proc_combo.addItem(name, p)
-        if hasattr(self, "placeholders_list") and hasattr(self, "mapping_list") and self.procedures:
+        if hasattr(self, "placeholders_list") and hasattr(self, "proc_combo") and self.procedures:
             self.proc_combo.setCurrentIndex(0)
+            # On startup select first and render preview (on_proc_changed will call render)
             self.on_proc_changed(0)
 
     def open_procedure_manager(self):
@@ -1241,11 +1257,8 @@ class MainWindow(QtWidgets.QMainWindow):
             for ph in phs:
                 item = QtWidgets.QListWidgetItem(ph)
                 self.placeholders_list.addItem(item)
-        if hasattr(self, "mapping_list"):
-            self.refresh_mapping_list()
-        if hasattr(self, "preview"):
-            self.preview.clear()
-            self.last_rendered_markup = ""
+        # render preview immediately
+        self.render_preview()
 
     def on_placeholder_clicked(self, item):
         placeholder = item.text()
@@ -1290,13 +1303,15 @@ class MainWindow(QtWidgets.QMainWindow):
         def on_item_clicked(clicked_item):
             text = clicked_item.text()
 
+            # push current state for undo
+            self.push_state()
+
             if text == "<unassigned>":
                 if placeholder in self.mapping:
                     del self.mapping[placeholder]
             elif "──" not in text:  # ignore separators
                 self.mapping[placeholder] = text
 
-            self.refresh_mapping_list()
             self.render_preview()
             dlg.accept()  # close instantly
 
@@ -1304,23 +1319,11 @@ class MainWindow(QtWidgets.QMainWindow):
 
         dlg.exec()
 
-
-
     def refresh_mapping_list(self):
-        if not hasattr(self, "mapping_list"):
-            return
-        self.mapping_list.clear()
-        for ph in self.placeholders:
-            val = self.mapping.get(ph, "")
-            li = QtWidgets.QListWidgetItem(f"{ph} → {val or '<unassigned>'}")
-            self.mapping_list.addItem(li)
+        assigned = sum(1 for v in self.mapping.values() if v)
+        self.statusBar().showMessage(f"{assigned}/{len(getattr(self, 'placeholders', []) or [])} placeholders assigned", 4000)
 
     def render_preview(self):
-        """
-        Build rendered text by replacing placeholders with assigned values,
-        store that markup string in self.last_rendered_markup, then render HTML in preview
-        so subscripts (including letter subscripts) and italics show visually.
-        """
         if not hasattr(self, "current_template"):
             return
         text = self.current_template
@@ -1330,49 +1333,33 @@ class MainWindow(QtWidgets.QMainWindow):
         rendered = re.sub(r"\{([a-zA-Z0-9_]+)\}", repl, text)
         self.last_rendered_markup = rendered
         self.update_preview_from_markup(rendered)
+        self.refresh_mapping_list()
 
     def update_preview_from_markup(self, markup):
-        """
-        Given the markup (raw text with _{..}, /{..}, etc.), render HTML and set to preview widget.
-        """
         paragraphs = []
+        font_pt = self.preview_font_pt or 14
         for line in markup.splitlines() or [""]:
             frag = render_markup_to_html(line)
-            paragraphs.append(f'<p style="text-align:justify; line-height:1.5; margin:0 0 6px 0;">{frag}</p>')
+            paragraphs.append(f'<p style="font-size:{font_pt}pt; text-align:justify; line-height:1.5; margin:0 0 6px 0;">{frag}</p>')
         html_full = "<html><body>" + "".join(paragraphs) + "</body></html>"
-        # set HTML to preview
         if hasattr(self, "preview"):
             self.preview.setHtml(html_full)
 
     def open_edit_output_dialog(self):
-        """
-        Open dialog to edit the current last_rendered_markup.
-        If there's no last_rendered_markup, try to generate via render_preview() first.
-        Saving in the dialog updates self.last_rendered_markup and preview, but does NOT write
-        changes to the procedure/template file — it's temporary only.
-        """
         if not getattr(self, "last_rendered_markup", "").strip():
-            # ensure something is generated
             self.render_preview()
         initial = getattr(self, "last_rendered_markup", "") or ""
         dlg = EditOutputDialog(self, initial_markup=initial)
         if dlg.exec() == QtWidgets.QDialog.Accepted:
+            # push previous state for undo
+            self.push_state()
             new_text = dlg.get_text() or ""
-            # store edited markup temporarily
             self.last_rendered_markup = new_text
             self.update_preview_from_markup(new_text)
 
     def _convert_unicode_subs_to_html_subs(self, s: str) -> str:
-        """
-        Convert sequences of Unicode subscript digits (₀₁₂...) into HTML <sub>...</sub>
-        where the digits inside are the ASCII equivalents. This ensures the HTML clipboard
-        contains <sub> tags (Word will import them as formatted subscript runs),
-        instead of plain Unicode subscript characters.
-        Example: "Et₂O" -> "Et<sub>2</sub>O"
-        """
         if not s:
             return s
-        # build a character class for the known unicode subscript digits
         chars = "".join(re.escape(ch) for ch in UNICODE_SUBSCRIPT_DIGITS)
         pattern = re.compile(f"[{chars}]+")
         def repl(m):
@@ -1382,48 +1369,29 @@ class MainWindow(QtWidgets.QMainWindow):
         return pattern.sub(repl, s)
 
     def copy_preview_to_clipboard(self):
-        """
-        Copy the last rendered markup to clipboard as HTML and plain text.
-        HTML uses <sub> and <i> tags and paragraph styling (justify + 1.5) so Word will paste exact formatting.
-        Important: mapping/preview may show Unicode subscript digits for on-screen display.
-        Here we convert any Unicode subscript digits back to HTML <sub>..</sub> so Word receives
-        formatted subs (not raw Unicode characters) and the pasted result matches Word formatting.
-        """
         markup = getattr(self, "last_rendered_markup", "") or ""
         if not markup.strip():
             return
-
-        # Convert Unicode subscript digits (from subscript_digits earlier) into <sub>digit</sub>
         markup_for_html = self._convert_unicode_subs_to_html_subs(markup)
-
         paragraphs = []
+        font_pt = self.preview_font_pt or 14
         for line in markup_for_html.splitlines() or [""]:
             frag = render_markup_to_html(line)
-            paragraphs.append(f'<p style="text-align:justify; line-height:1.5; margin:0 0 6px 0;">{frag}</p>')
+            paragraphs.append(f'<p style="font-size:{font_pt}pt; text-align:justify; line-height:1.5; margin:0 0 6px 0;">{frag}</p>')
         html_full = f"<html><body>{''.join(paragraphs)}</body></html>"
-
-        # Plain ASCII: remove markup and convert unicode subs back to ASCII digits
         plain_lines = []
         for line in markup.splitlines() or [""]:
-            # first convert unicode subscript digits to ascii so plain text contains normal digits
             ascii_line = remove_subscript_unicode(line)
             ascii_line = strip_markup_to_plain_ascii(ascii_line)
             plain_lines.append(ascii_line)
         plain_ascii = "\n".join(plain_lines)
-
         mime = QtCore.QMimeData()
         mime.setHtml(html_full)
         mime.setText(plain_ascii)
         cb = QtWidgets.QApplication.clipboard()
         cb.setMimeData(mime)
-        # silent copy
 
     def export_word(self):
-        """
-        Export the last rendered markup to a Word document.
-        Applies paragraph formatting: justified alignment and 1.5 line spacing.
-        Converts markup to subscript/italic runs.
-        """
         markup = getattr(self, "last_rendered_markup", "") or ""
         if not markup.strip():
             QtWidgets.QMessageBox.warning(self, "Empty", "Nothing to export")
@@ -1431,7 +1399,6 @@ class MainWindow(QtWidgets.QMainWindow):
         save_path, _ = QtWidgets.QFileDialog.getSaveFileName(self, "Save Word Document", str(Path.cwd() / "experimental_section.docx"), "Word Document (*.docx)")
         if not save_path:
             return
-
         token_re = re.compile(
             r'(?P<htmlsub><sub>\s*([^<]+?)\s*</sub>)'
             r'|_(?P<brace_sub>\{([^}]+)\})'
@@ -1444,7 +1411,6 @@ class MainWindow(QtWidgets.QMainWindow):
             doc = Document()
             for line in markup.splitlines() or [""]:
                 p = doc.add_paragraph()
-                # set paragraph formatting: justified, 1.5 line spacing
                 pf = p.paragraph_format
                 try:
                     pf.alignment = WD_PARAGRAPH_ALIGNMENT.JUSTIFY
@@ -1457,7 +1423,6 @@ class MainWindow(QtWidgets.QMainWindow):
                         pf.line_spacing = Pt(18)
                     except Exception:
                         pass
-
                 last = 0
                 for m in token_re.finditer(line):
                     if m.start() > last:
@@ -1507,10 +1472,6 @@ class MainWindow(QtWidgets.QMainWindow):
         except Exception as e:
             QtWidgets.QMessageBox.critical(self, "Error", f"Failed to save Word: {e}")
 
-    # ---------------------------
-    # Trivial names management UI wrapper
-    # ---------------------------
-
     def open_trivial_names_manager(self):
         dlg = TrivialNamesManagerDialog(self, mapping=self.trivial_names)
         if dlg.exec() == QtWidgets.QDialog.Accepted:
@@ -1518,27 +1479,28 @@ class MainWindow(QtWidgets.QMainWindow):
             save_trivial_names(self.trivial_names)
             self.statusBar().showMessage(f"Saved {len(self.trivial_names)} trivial name entries", 4000)
 
-    # ---------------------------
-    # Convert names in preview
-    # ---------------------------
+    def open_assigned_mapping_dialog(self):
+        dlg = AssignedMappingDialog(self, placeholders=getattr(self, "placeholders", []), mapping=self.mapping)
+        if dlg.exec() == QtWidgets.QDialog.Accepted:
+            # push current state for undo, then copy returned mapping
+            self.push_state()
+            self.mapping = dlg.mapping
+            self.render_preview()
 
     def convert_preview_formulas_to_names(self):
         """
-        Convert formulas in self.last_rendered_markup to trivial names (from file) or IUPAC (PubChem fallback).
-        Updates self.last_rendered_markup and the preview.
+        Convert formulas in self.last_rendered_markup using only trivial_names mapping.
+        No network lookups.
         """
         markup = getattr(self, "last_rendered_markup", "") or ""
         if not markup.strip():
             QtWidgets.QMessageBox.information(self, "Nothing", "No rendered text to convert.")
             return
 
-        # Build trivial mapping (keys normalized to ASCII, uppercase sensitive)
         trivial_map = {k: v for k, v in self.trivial_names.items()}
 
         # find candidate tokens in markup that look like formulas:
-        # token chars: letters, digits, unicode subscript digits, parentheses
         token_candidates = set(re.findall(r'[A-Za-z₀₁₂₃₄₅₆₇₈₉0-9\(\)]+', markup))
-        # normalize candidates and filter those that contain at least one letter and at least one digit (likely formulas)
         candidates = []
         for tok in token_candidates:
             plain = remove_subscript_unicode(strip_markup_to_plain_ascii(tok)).strip()
@@ -1551,71 +1513,96 @@ class MainWindow(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.information(self, "No formulas", "No formula-like tokens found to convert.")
             return
 
-        # Sort candidates by length of plain formula descending (avoid partial replacements)
+        # Sort to avoid partial replacements
         candidates.sort(key=lambda x: len(x[1]), reverse=True)
 
         new_markup = markup
         looked_up = {}
-        pubchem_cache = {}
+
+        # push previous state for undo
+        self.push_state()
 
         for orig_tok, plain in candidates:
             plain_norm = plain.replace(" ", "")
-            # first: try trivial mapping (exact ASCII key)
             trivial_name = trivial_map.get(plain_norm)
             if trivial_name:
-                # replace occurrences of the original token (which may have unicode subs) with trivial name
-                # Use simple string replace for the exact token text to preserve other markup
                 new_markup = new_markup.replace(orig_tok, trivial_name)
                 looked_up[plain_norm] = ("trivial", trivial_name)
-                continue
-
-            # second: try matching ascii form of token (maybe markup removed)
-            # also try replacing any unicode-subscript variant
-            unicode_variant = subscript_digits(plain_norm)
-            replaced = False
-            if unicode_variant in new_markup:
-                # Double-check trivial mapping for ascii (already done), so fallback to PubChem
-                # We'll attempt PubChem lookup for plain_norm
-                pass
-
-            # If not in trivial map, attempt PubChem (best-effort)
-            if plain_norm in pubchem_cache:
-                iupac = pubchem_cache[plain_norm]
-            else:
-                # Attempt network lookup (may be slow). Do not raise on error.
-                iupac = lookup_iupac_from_pubchem_by_formula(plain_norm)
-                pubchem_cache[plain_norm] = iupac
-                # be a bit gentle on PubChem if many queries
-                time.sleep(0.15)
-
-            if iupac:
-                # Replace occurrences of orig_tok (token as in markup) and also ascii and unicode variants
-                new_markup = new_markup.replace(orig_tok, iupac)
-                # also replace raw ASCII occurrences (rare) and unicode variant
-                new_markup = new_markup.replace(plain_norm, iupac)
-                new_markup = new_markup.replace(unicode_variant, iupac)
-                looked_up[plain_norm] = ("iupac", iupac)
             else:
                 looked_up[plain_norm] = ("notfound", None)
 
-        # If there was any successful replacement, update
         any_changed = new_markup != markup
         if any_changed:
             self.last_rendered_markup = new_markup
             self.update_preview_from_markup(new_markup)
-            # summary message
-            found_count = sum(1 for v in looked_up.values() if v[0] in ("trivial", "iupac"))
-            self.statusBar().showMessage(f"Converted {found_count} formula(s) (trivial/iupac) in preview", 6000)
+            found_count = sum(1 for v in looked_up.values() if v[0] == "trivial")
+            self.statusBar().showMessage(f"Converted {found_count} formula(s) using trivial names", 6000)
             QtWidgets.QMessageBox.information(self, "Converted", f"Converted {found_count} formula(s) in the preview.")
         else:
-            QtWidgets.QMessageBox.information(self, "No changes", "No conversions were possible (no trivial names found and no IUPAC names from PubChem).")
+            QtWidgets.QMessageBox.information(self, "No changes", "No conversions were possible with trivial names.")
+
+    # ---------------------------
+    # Nearest-placeholder drop resolution (unchanged behaviour)
+    # ---------------------------
+
+    def on_preview_dropped(self, text: str, pos: QtCore.QPoint):
+        if not getattr(self, "current_template", ""):
+            QtWidgets.QMessageBox.information(self, "No template", "No procedure/template loaded.")
+            return
+
+        doc = self.preview.document()
+        best_ph = None
+        best_dist = float('inf')
+
+        for ph in getattr(self, "placeholders", []) or []:
+            visible = self.mapping.get(ph, f"{{{ph}}}")
+            if not visible:
+                visible = f"{{{ph}}}"
+            search_text = remove_subscript_unicode(strip_markup_to_plain_ascii(visible))
+            if not search_text:
+                search_text = visible
+            cursor = doc.find(search_text, 0)
+            while cursor and not cursor.isNull():
+                rect = self.preview.cursorRect(cursor)
+                center = rect.center()
+                dx = center.x() - pos.x()
+                dy = center.y() - pos.y()
+                dist = math.hypot(dx, dy)
+                if dist < best_dist:
+                    best_dist = dist
+                    best_ph = ph
+                start_after = cursor.position() + 1
+                cursor = doc.find(search_text, start_after)
+
+        if not best_ph:
+            all_phs = extract_placeholders(self.current_template)
+            if all_phs:
+                best_ph = all_phs[0]
+
+        if not best_ph:
+            QtWidgets.QMessageBox.information(self, "No placeholders", "No placeholder was found in the template to assign to.")
+            return
+
+        val = text.strip()
+        if val:
+            if "──" in val:
+                return
+            # push state for undo
+            self.push_state()
+            if val == "<unassigned>":
+                if best_ph in self.mapping:
+                    del self.mapping[best_ph]
+            else:
+                self.mapping[best_ph] = val
+            self.render_preview()
+            self.statusBar().showMessage(f"Assigned '{val}' to placeholder {{{best_ph}}}", 3000)
 
 def main():
     app = QtWidgets.QApplication(sys.argv)
+    app.setStyleSheet(DARK_STYLESHEET)
     win = MainWindow()
     win.show()
     sys.exit(app.exec())
 
 if __name__ == "__main__":
     main()
-
