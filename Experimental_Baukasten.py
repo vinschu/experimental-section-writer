@@ -452,40 +452,147 @@ def find_cdxml_files(root_folder):
     return cdxml_files
 
 def format_component_display_by_index(component, is_last=False):
+    """
+    Extrahiert relevante Zeilen aus component['values'] und baut die Anzeige zusammen.
+
+    Änderungen:
+    - Für alle verwendeten Zeilen (row0, row4, row5, row9, row10, row11) wird zuerst
+      normalize_commas_in_number_string angewendet und danach ein Leerzeichen zwischen
+      Zahl und vielen gebräuchlichen Einheiten eingefügt (z. B. "10mg" -> "10 mg").
+      Prozentangaben bleiben unverändert (z. B. "5%").
+    - Verhalten für die letzte Zeile: Anzeige als "row1 (row9, row10, row11)" wie gewünscht.
+    """
+    import re
+
     vals = component.get("values", [])
-    def safe(i):
+
+    def get_last_col_value(row_index):
         try:
-            return (vals[i] or "").strip()
+            if not vals:
+                return ""
+            first = vals[0]
+            # Fall: values ist Liste von Zeilen (jede Zeile ist Liste/Tuple von Spalten)
+            if isinstance(first, (list, tuple)):
+                # Wenn row_index außerhalb liegt, fange Exception ab
+                return (vals[row_index][-1] or "").strip() if row_index < len(vals) and vals[row_index] else ""
+            # Fall: values ist Liste von Spalten (jede Spalte ist Liste/Tuple von Zeilen)
+            last = vals[-1]
+            if isinstance(last, (list, tuple)):
+                return (last[row_index] or "").strip() if row_index < len(last) else ""
+            # Fallback: flache Liste (einspaltig)
+            return (vals[row_index] or "").strip() if row_index < len(vals) else ""
         except Exception:
             return ""
-    row0 = safe(0)
-    row4 = safe(4)
-    row5 = safe(5)
-    row9 = safe(9)
-    row10 = safe(10)
-    row0_disp = normalize_commas_in_number_string(row0)
-    row4_disp = normalize_commas_in_number_string(row4)
-    row5_disp = normalize_commas_in_number_string(row5)
-    row9_disp = normalize_commas_in_number_string(row9)
-    row10_disp = normalize_commas_in_number_string(row10)
+
+    def get_first_col_value(row_index):
+        """Wird für formula/backoff verwendet (ähnlich zum Originalverhalten)."""
+        try:
+            if not vals:
+                return ""
+            first = vals[0]
+            # Liste von Zeilen -> erste Spalte ist index 0
+            if isinstance(first, (list, tuple)):
+                return (vals[row_index][0] or "").strip() if row_index < len(vals) and vals[row_index] else ""
+            # Liste von Spalten -> erste Spalte ist vals[0]
+            if isinstance(vals[0], (list, tuple)):
+                col0 = vals[0]
+                return (col0[row_index] or "").strip() if row_index < len(col0) else ""
+            # Fallback: flache Liste
+            return (vals[row_index] or "").strip() if row_index < len(vals) else ""
+        except Exception:
+            return ""
+
+    def space_before_units(s: str) -> str:
+        """
+        Fügt ein Leerzeichen zwischen Zahl und gebräuchlichen Einheiten ein.
+        Belässt reine Prozentangaben '5%' unverändert.
+        """
+        if not s:
+            return s
+        # Entferne überflüssige Leerzeichen vor '%' (so bleibt '5%' ohne Leerzeichen)
+        s = re.sub(r'\s+%', '%', s)
+
+        # Erweiterbare Einheitensammlung (große Auswahl gebräuchlicher Einheiten)
+        units = [
+            r'mg', r'g', r'kg', r'µg', r'ug', r'μg',
+            r'mol', r'mmol', r'µmol', r'umol', r'cmol', r'mM', r'M',
+            r'mol/L', r'mol·L-1', r'mol L-1', r'mol·kg-1',
+            r'L', r'l', r'mL', r'mmL', r'mml', r'ml', r'µL', r'uL', r'nL',
+            r'µg/mL', r'ug/mL', r'wt%', r'v/v', r'v/v\%', r'ppm',
+            r'eq\.?', r'equiv\.?', r'equiv', r'U', r'°C', r'K',
+            r'bar', r'kPa', r'atm', r'mmHg', r'cm', r'mm', r'µm', r'nm'
+        ]
+        units_pattern = r'(?:' + r'|'.join(units) + r')\b'
+
+        # Ersetze Muster wie "10mg", "1,0mol", "2e-3mol" -> "10 mg", "1,0 mol", "2e-3 mol"
+        def repl(m):
+            num = m.group('num')
+            unit = m.group('unit')
+            return f"{num} {unit}"
+
+        s = re.sub(
+            rf'(?i)(?P<num>[-+]?\d[\d\.,eE+\-]*)\s*(?P<unit>{units_pattern})',
+            repl,
+            s
+        )
+
+        return s
+
+    def process_disp(raw: str) -> str:
+        """Normalize commas and add spacing to units."""
+        if not raw:
+            return ""
+        normalized = normalize_commas_in_number_string(raw)
+        spaced = space_before_units(normalized)
+        return spaced
+
+    # Extract relevant raw values (using first/last-col heuristics)
+    row0_raw = get_first_col_value(0)
+    row4_raw = get_last_col_value(4)
+    row5_raw = get_last_col_value(5)
+    row9_raw = get_last_col_value(9)
+    row10_raw = get_last_col_value(10)
+    row11_raw = get_last_col_value(11)
+
+    # Process displays for all these rows
+    row0_disp = process_disp(row0_raw)
+    row4_disp = process_disp(row4_raw)
+    row5_disp = process_disp(row5_raw)
+    row9_disp = process_disp(row9_raw)
+    row10_disp = process_disp(row10_raw)
+    row11_disp = process_disp(row11_raw)
+
+    # row4_eq_disp should append "eq." if necessary (apply on processed form)
     row4_eq_disp = append_eq_if_present(row4_disp) if row4_disp else ""
-    chosen = row9_disp if (row9 and not is_zero_ml(row9)) else row5_disp
-    formula_raw = component.get("formula", "").strip() or row0
+
+    # chosen logic: prefer row9 unless it's an effective zero-ml, else row5
+    chosen = row9_disp if (row9_raw and not is_zero_ml(row9_raw)) else row5_disp
+
+    # formula fallback logic (retain original cleaning and subscript display)
+    formula_raw = component.get("formula", "").strip() or row0_raw
     formula_raw = re.sub(r'^[\s\-_\.0-9:()]+', '', formula_raw).strip()
     formula_display = subscript_digits(formula_raw)
+
     if is_last:
-        return {"formula": formula_raw, "display": formula_display, "details": {"row0": row0_disp}}
+        # For last row show "row1 (row9, row10, row11)" as requested.
+        # For row1 we keep subscripted formula-like display (row0 may be a formula)
+        row1_label = subscript_digits(row0_raw) if row0_raw else formula_display or formula_raw
+        bracket_parts = []
+        for part in (row9_disp, row10_disp, row11_disp):
+            if part:
+                bracket_parts.append(part)
+        bracket = ", ".join(bracket_parts)
+        display = f"{row1_label} ({bracket})" if bracket else row1_label
+        return {"formula": formula_raw, "display": display, "details": {"row1": row1_label, "row9": row9_disp, "row10": row10_disp, "row11": row11_disp}}
+
+    # Non-last: original behaviour: formula_display with bracket built from chosen, row10, row4_eq
     bracket_parts = []
     for part in (chosen, row10_disp, row4_eq_disp):
         if part:
             bracket_parts.append(part)
     bracket = ", ".join(bracket_parts)
-    if bracket:
-        display = f"{formula_display} ({bracket})"
-    else:
-        display = formula_display
+    display = f"{formula_display} ({bracket})" if bracket else formula_display
     return {"formula": formula_raw, "display": display, "details": {"chosen": chosen, "row10": row10_disp, "row4_eq": row4_eq_disp}}
-
 # ---------------------------
 # Draggable list widget: ensure plain-text mime during drag
 # ---------------------------
@@ -873,6 +980,20 @@ class EditOutputDialog(QtWidgets.QDialog):
         layout = QtWidgets.QVBoxLayout(self)
         self.editor = QtWidgets.QPlainTextEdit()
         self.editor.setPlainText(initial_markup or "")
+        # Increase editor font size by 3 points relative to preview font if available
+        try:
+            font = self.editor.font()
+            base_pt = None
+            if parent is not None and hasattr(parent, "preview_font_pt") and isinstance(parent.preview_font_pt, (int, float)):
+                base_pt = int(parent.preview_font_pt)
+            else:
+                # fallback to application's default font point size or editor's current size
+                base_pt = int(font.pointSize()) if font.pointSize() > 0 else int(QtWidgets.QApplication.font().pointSize() or 12)
+            font.setPointSize(max(1, base_pt + 3))
+            self.editor.setFont(font)
+        except Exception:
+            # non-fatal: ignore font adjustments on failure
+            pass
         layout.addWidget(self.editor)
         btns = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Save | QtWidgets.QDialogButtonBox.Cancel)
         btns.accepted.connect(self.accept)
@@ -1156,13 +1277,51 @@ class MainWindow(QtWidgets.QMainWindow):
         if fpath:
             self.load_cdxml_paths([fpath])
             return
-
-        folder = QtWidgets.QFileDialog.getExistingDirectory(self, "Select folder to scan for CDXML files", str(Path.cwd()))
-        if not folder:
-            return
-        self.load_cdxml_paths([folder])
+        return
 
     def load_cdxml_paths(self, paths):
+    # Wenn neue Dateien/Folders geladen werden: vorherige Zuordnungen rücksetzen
+    # und Preview auf ungefüllten Template-Zustand bringen.
+        try:
+            # Falls es aktuelle Zuordnungen oder gerenderten Text gibt, in die History pushen
+            # damit das Löschen rückgängig gemacht werden kann.
+            try:
+                if getattr(self, "mapping", None) or getattr(self, "last_rendered_markup", None):
+                    self.push_state()
+            except Exception:
+                # im Fehlerfall trotzdem fortfahren
+                pass
+
+            # Entferne alle aktuellen Assignments (keine Undo-Pushes - bereits oben gepusht)
+            self.mapping = {}
+            self.last_rendered_markup = ""
+            # Clear preview widget content
+            if hasattr(self, "preview") and self.preview is not None:
+                try:
+                    self.preview.clear()
+                except Exception:
+                    pass
+            # Clear chemicals list UI while we load new ones
+            if hasattr(self, "chem_list") and self.chem_list is not None:
+                try:
+                    self.chem_list.clear()
+                except Exception:
+                    pass
+            # Clear placeholders list UI (will be repopulated if procedure selected)
+            if hasattr(self, "placeholders_list") and self.placeholders_list is not None:
+                try:
+                    self.placeholders_list.clear()
+                except Exception:
+                    pass
+            # Update status of mapping/UI
+            try:
+                self.refresh_mapping_list()
+            except Exception:
+                pass
+        except Exception:
+            # be robust: don't block loading if clearing fails
+            pass
+
         to_parse = []
         for p in paths:
             if os.path.isfile(p):
@@ -1206,12 +1365,29 @@ class MainWindow(QtWidgets.QMainWindow):
             normalized.append(c)
         if not normalized:
             QtWidgets.QMessageBox.information(self, "No chemicals", "No candidate chemicals found in the selected file(s).")
+            # preview is already cleared at the top; ensure UI mapping state consistent
+            try:
+                self.refresh_mapping_list()
+            except Exception:
+                pass
             return
         self.chemicals = normalized
+        # populate chemicals list UI
         self.chem_list.clear()
         for c in self.chemicals:
             self.chem_list.addItem(c["display"])
         self.statusBar().showMessage(f"Loaded {len(self.chemicals)} candidate chemicals", 5000)
+
+        # Ensure assignments remain cleared and preview shows the template with placeholders unfilled.
+        # (If a procedure/template is selected, render it with placeholders unassigned)
+        try:
+            self.mapping = {}
+            # render the current template (will show placeholders as {name} if unassigned)
+            self.render_preview()
+            self.refresh_mapping_list()
+        except Exception:
+            # non-fatal: ignore rendering errors here
+            pass
 
     def refresh_solvents_list(self):
         self.solv_list.clear()
