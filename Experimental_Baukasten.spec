@@ -1,12 +1,16 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+from PyInstaller.utils.hooks import collect_dynamic_libs, collect_submodules
+
+qt_hiddenimports = collect_submodules('PySide6') + collect_submodules('shiboken6')
+qt_binaries = collect_dynamic_libs('PySide6') + collect_dynamic_libs('shiboken6')
 
 a = Analysis(
     ['Experimental_Baukasten.py'],
     pathex=[],
-    binaries=[],
+    binaries=qt_binaries,
     datas=[('procedures.json', '.'), ('solvents.json', '.'), ('trivial_names.json', '.'), ('reaction_learning.json', '.')],
-    hiddenimports=[],
+    hiddenimports=qt_hiddenimports + ['shiboken6.Shiboken'],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
