@@ -1,9 +1,23 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+import sys
+from pathlib import Path
+
 from PyInstaller.utils.hooks import collect_dynamic_libs, collect_submodules
 
 qt_hiddenimports = collect_submodules('PySide6') + collect_submodules('shiboken6')
 qt_binaries = collect_dynamic_libs('PySide6') + collect_dynamic_libs('shiboken6')
+conda_bin = Path(sys.prefix) / 'Library' / 'bin'
+qt_binaries += [
+    (str(path), '.')
+    for path in conda_bin.glob('shiboken6*.dll')
+    if path.is_file()
+]
+qt_binaries += [
+    (str(path), '.')
+    for path in conda_bin.glob('pyside6*.dll')
+    if path.is_file()
+]
 
 a = Analysis(
     ['Experimental_Baukasten.py'],
