@@ -5,7 +5,7 @@ a = Analysis(
     ['Experimental_Baukasten.py'],
     pathex=[],
     binaries=[],
-    datas=[('procedures.json', '.'), ('solvents.json', '.'), ('trivial_names.json', '.')],
+    datas=[('procedures.json', '.'), ('solvents.json', '.'), ('trivial_names.json', '.'), ('reaction_learning.json', '.')],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
