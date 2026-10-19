@@ -27,6 +27,43 @@
     "id": "proc6",
     "name": "Miyaura Borylation",
     "description": "",
-    "template": "{C1}, {C2} and {base} were dissolved in degassed, anhydrous {solvent} and subsequently {catalyst} was added. The reaction was stirred for {reaction_time} at {temperature}. After cooling to r.t., it was diluted with {solvent2}, the phases were separated, and the aqueous layer was extracted with {solvent3} (3 x). The organic layer was dried over MgSO_4 and the solvent removed under reduced pressure. The crude product was further purified via column chromatography (eluent: {solvent4}:{solvent5}= X:X, /R_f = X.XX) to obtain {product} as XX."
+    "template": "{C1}, {C2} and {base} were dissolved in degassed, anhydrous {solvent} and subsequently {catalyst} was added. The reaction was stirred for {reaction_time} at XX°C. After cooling to r.t., it was diluted with {solvent2}, the phases were separated, and the aqueous layer was extracted with {solvent3} (3 x). The organic layer was dried over MgSO_4 and the solvent removed under reduced pressure. The crude product was further purified via column chromatography (eluent: {solvent4}:{solvent5}= X:X, /R_f = X.XX) to obtain {product} as XX."
+  },
+  
+  {
+    "id": "proc7",
+    "name": "Sonogashira Coupling",
+    "description": "",
+    "template": "{C1}, {C2} and {base} were dissolved in degassed, anhydrous {solvent}. The mixture was degassed via argon-bubbling for 0.5 h and subsequently {catalyst_Pd} and {catalyst_Cu} were added. The reaction was stirred for XX h at XX°C. After cooling to r.t., it was diluted with {solvent2}, the phases were separated, and the aqueous layer was extracted with {solvent3}. The combined organic layers were dried over MgSO_4 and the solvent was removed under reduced pressure. The crude product was purified via column chromatography (eluent: {solvent4}:{solvent5} = X:X, /R_f = X.XX) to obtain {product} as XX."
+  },
+  {
+    "id": "proc8",
+    "name": "Buchwald-Hartwig Amination",
+    "description": "",
+    "template": "{C1}, {C2} and {base} were dissolved in anhydrous {solvent} (XX mL). The mixture was degassed via argon-bubbling and subsequently {catalyst} and {ligand} were added. The reaction was stirred for XX h at 100 °C. After cooling to r.t., it was diluted with {solvent2}, the phases were separated, and the aqueous layer was extracted with {solvent3}. The combined organic layers were dried over MgSO_4 and the solvent was removed under reduced pressure. The crude product was further purified via column chromatography (eluent: {solvent4}:{solvent5} = X:X, /R_f = X.XX) to obtain {product} as XXX."
+  },
+  {
+    "id": "proc9",
+    "name": "Grignard Reaction",
+    "description": "General addition",
+    "template": "{C1} was dissolved in anhydrous {solvent} (XX mL). The mixture was cooled to 0 °C and subsequently, {Grignard_reagent} was added dropwise. The reaction was allowed to warm to r.t. and stirred for XX h. The mixture was quenched with saturated NH_4Cl solution, the phases were separated, and the aqueous layer was extracted with {solvent3}. The combined organic layers were dried over MgSO_4 and the solvent was removed under reduced pressure. The crude product was further purified via column chromatography (eluent: {solvent4}:{solvent5} = X:X, /R_f = X.XX) to obtain {product} as XXX."
+  },
+  {
+    "id": "proc10",
+    "name": "Steglich Esterification",
+    "description": "",
+    "template": "{C1} (Acid) and {C2} (Alcohol) were dissolved in anhydrous {solvent}. The mixture was cooled to 0 °C and {catalyst} (DMAP) and {coupling_agent} (DCC) were added. The reaction was stirred for XX h at r.t. The precipitated urea was filtered off and the filtrate was concentrated under reduced pressure. The residue was redissolved in {solvent2}, washed with {solvent3}, dried over MgSO_4 and the solvent was removed under reduced pressure. The crude product was further purified via column chromatography (eluent: {solvent4}:{solvent5} = X:X, /R_f = X.XX) to obtain {product} as XXX."
+  },
+  {
+    "id": "proc11",
+    "name": "Wittig Reaction",
+    "description": "",
+    "template": "{phosphonium_salt} was suspended in anhydrous {solvent}. The mixture was cooled to 0 °C and {base} was added. After stirring for 0.5 h, {C1} was added. The reaction was stirred for XX h at r.t. The mixture was quenched with {solvent2}, the phases were separated, and the aqueous layer was extracted with {solvent3}. The combined organic layers were dried over MgSO_4 and the solvent was removed under reduced pressure. The crude product was further purified via column chromatography (eluent: {solvent4}:{solvent5} = X:X, /R_f = X.XX) to obtain {product} as XX."
+  },
+  {
+    "id": "proc12",
+    "name": "CuAAC Click Reaction",
+    "description": "Copper-catalyzed azide-alkyne cycloaddition",
+    "template": "{C1} and {C2} were dissolved in a mixture of {solvent} and water. Subsequently, {catalyst} and {reagent} were added. The reaction was stirred for XX h at r.t. The mixture was diluted with {solvent2}, the phases were separated, and the aqueous layer was extracted with {solvent3}. The combined organic layers were dried over MgSO_4 and the solvent was removed under reduced pressure. The crude product was further purified via column chromatography (eluent: {solvent4}:{solvent5} = X:X, /R_f = X.XX) to obtain {product} as XXX."
   }
 ]

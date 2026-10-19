@@ -1,0 +1,54 @@
+{
+  "c13h19bo3|c4h9li|c7h7bro|c9h19bo3": {
+    "proc4": 1
+  },
+  "c20h21bo2|c34h30cl2fep2pd|c54h37br|c68h46|ccs2o3": {
+    "proc3": 2,
+    "__mapping__": {
+      "C2": "C₂₀H₂₁BO₂ (76.00 mg, 249.84 µmol, 1.00 eq.)",
+      "catalyst": "C₃₄H₃₀Cl₂FeP₂Pd (18.33 mg, 24.98 µmol, 0.10 eq.)",
+      "base": "CCs₂O₃ (325.61 mg, 999.36 µmol, 4.00 eq.)",
+      "product": "C₆₈H₄₆ (87.00 mg, 100.80 µmol, 40.35%)",
+      "C1": "C₅₄H₃₇Br (200.89 mg, 262.33 µmol, 1.05 eq.)"
+    }
+  },
+  "c12h8bri|c34h30cl2fep2pd|c48h41bo2|c4h8o|c54h37br|cs2co3": {
+    "proc3": 2,
+    "__mapping__": {
+      "C2": "C₄₈H₄₁BO₂ (408.68, 270.00 mg, 1.00 eq.)",
+      "catalyst": "C₃₄H₃₀Cl₂FeP₂Pd (40.87, 29.99 mg, 0.10 eq.)",
+      "C1": "C₁₂H₈BrI (613.02, 220.08 mg, 1.50 eq.)",
+      "base": "Cs₂CO₃ (1.63 mmol, 532.62 mg, 4.00 eq.)",
+      "product": "C₅₄H₃₇Br (200.70 mg, 262.08, 64.13%)"
+    }
+  },
+  "c12h24b2o4|c2h3ko2|c34h30cl2fep2pd|c42h29br|c48h41bo2|c4h8o": {
+    "proc3": 1,
+    "__mapping__": {
+      "C2": "C₁₂H₂₄B₂O₄ (579.40 mg, 2.28 mmol, 2.00 eq.)",
+      "catalyst": "C₃₄H₃₀Cl₂FeP₂Pd (83.70 mg, 114.08 mol, 0.10 eq.)",
+      "C1": "C₄₂H₂₉Br (700.00 mg, 1.14 mmol, 1.00 eq.)",
+      "product": "C₄₈H₄₁BO₂ (274.30 mg, 415.19 mol, 36.39%)",
+      "base": "C₂H₃KO₂ (671.77 mg, 6.84 mmol, 6.00 eq.)"
+    },
+    "proc6": 2
+  },
+  "c16h27bo2s|c27h14br3n3o|c57h59n3os3|c72h60p4pd|cs2co3": {
+    "proc3": 3,
+    "__mapping__": {
+      "C1": "C₂₇H₁₄Br₃N₃O (175.00 mg, 275.10 mol, 1.00 eq.)",
+      "C2": "C₁₆H₂₇BO₂S (267.13 mg, 907.82 mol, 3.30 eq.)",
+      "product": "C₅₇H₅₉N₃OS₃ (36.00 mg, 40.08 mol, 14.57%)",
+      "catalyst": "C₇₂H₆₀P₄Pd (31.79 mg, 27.51 mol, 0.10 eq.)",
+      "base": "Cs₂CO₃ (0.00 g, 1.10 mmol, 4.00 eq.)"
+    }
+  },
+  "c132h90|c44h30|c8co2o8": {
+    "proc5": 1,
+    "__mapping__": {
+      "catalyst": "C₈Co₂O₈ (2.91 mg, 8.50 µmol, 0.25 eq.)",
+      "product": "C₁₃₂H₉₀ (8.00 mg, 4.77 µmol, 100.00% eq.)",
+      "C1": "C₄₄H₃₀ (57.00 mg, 102.02 µmol, 3.00 eq.)"
+    }
+  }
+}

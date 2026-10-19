@@ -11,18 +11,20 @@ import time
 import math
 from copy import deepcopy
 from pathlib import Path
+import os
+
+os.environ.setdefault(
+    "QT_QPA_FONTDIR",
+    str(Path(os.environ.get("WINDIR", r"C:\Windows")) / "Fonts"),
+)
+
 from PySide6 import QtWidgets, QtGui, QtCore
 from docx import Document
 from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
 from docx.shared import Pt
 
 import xml.etree.ElementTree as ET
-import os
 import html as html_std
-import urllib.parse
-import urllib.request
-import urllib.error
-import socket
 
 # Standard-Datei-Pfade
 if getattr(sys, 'frozen', False):
@@ -33,82 +35,76 @@ else:
 PROCEDURES_FILE = APP_DIR / "procedures.json"
 SOLVENTS_FILE = APP_DIR / "solvents.json"
 TRIVIALS_FILE = APP_DIR / "trivial_names.json"
+REACTION_LEARNING_FILE = APP_DIR / "reaction_learning.json"
 
-# Dark stylesheet applied at application level.
-# Main background darker, windows/dialogs and their inner areas slightly lighter and unified.
+# Dark stylesheet applied at application level, inspired by modern Apple software.
 DARK_STYLESHEET = """
-    QMainWindow { background: #070707; color: #ffffff; }
-    QWidget { color: #ffffff; background: #171717; }               /* unified inner window color */
-    QDialog, QFrame { background: #171717; color: #ffffff; border: 1px solid #2a2a2a; border-radius: 3px; }
-    QMenuBar { background: #070707; color: #ffffff; }
-    QMenuBar::item { background: transparent; color: #ffffff; }
-    QMenu { background: #111111; color: #ffffff; }
+    QWidget { background: #1c1c1e; color: #f5f5f7; font-family: "SF Pro Display", "Segoe UI", sans-serif; font-size: 13px; }
+    QMainWindow, QDialog { background: #1c1c1e; }
+    QFrame { background: #242426; color: #f5f5f7; border: 1px solid #3a3a3c; border-radius: 8px; }
+    QMenuBar { background: #242426; color: #f5f5f7; border-bottom: 1px solid #3a3a3c; padding: 2px 6px; }
+    QMenuBar::item { background: transparent; color: #f5f5f7; padding: 6px 9px; border-radius: 5px; }
+    QMenuBar::item:selected { background: #3a3a3c; }
+    QMenu { background: #2c2c2e; color: #f5f5f7; border: 1px solid #48484a; padding: 5px; }
+    QMenu::item { padding: 7px 24px 7px 10px; border-radius: 5px; }
+    QMenu::item:selected { background: #3a3a3c; }
 
-    /* Lists & textareas: make preview same as other windows */
-    QListWidget { background: #1b1b1b; border: 1px solid #2a2a2a; color: #eaeaea; }
-    QTextEdit { background: #171717; border: 1px solid #2a2a2a; color: #eaeaea; }
-    QLineEdit, QPlainTextEdit { background: #1a1a1a; border: 1px solid #2a2a2a; color: #ffffff; }
+    QListWidget, QTextEdit, QLineEdit, QPlainTextEdit, QComboBox, QSpinBox, QDoubleSpinBox {
+        background: #2c2c2e; color: #f5f5f7; border: 1px solid #48484a; border-radius: 7px;
+        padding: 6px 8px; selection-background-color: #0a84ff; selection-color: #ffffff;
+    }
+    QListWidget::item { padding: 5px 7px; border-radius: 5px; }
+    QListWidget::item:selected { background: #164a78; color: #ffffff; }
+    QLineEdit:focus, QPlainTextEdit:focus, QTextEdit:focus, QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus {
+        border: 2px solid #0a84ff; padding: 5px 7px;
+    }
+    QComboBox { padding-right: 30px; }
+    QComboBox::drop-down { subcontrol-origin: padding; subcontrol-position: top right; width: 28px; border-left: 1px solid #48484a; }
+    QComboBox::down-arrow { width: 0; height: 0; border-left: 5px solid transparent; border-right: 5px solid transparent; border-top: 6px solid #a1a1a6; }
+    QComboBox:hover { border-color: #636366; }
+    QComboBox QAbstractItemView { background: #2c2c2e; color: #f5f5f7; border: 1px solid #48484a; padding: 4px; outline: 0; }
+    QComboBox QAbstractItemView::item { min-height: 20px; padding: 2px 8px; border-radius: 5px; }
+    QComboBox QAbstractItemView::item:hover, QComboBox QAbstractItemView::item:selected { background: #3a3a3c; color: #ffffff; }
 
-    /* Haupt-Button (blau) */
     QPushButton {
-        background-color: #2d89ef;
-        color: white;
-        padding: 6px 10px;
-        border-radius: 4px;
-        border: 1px solid #2677d9;
+        background-color: #3a3a3c; color: #f5f5f7; padding: 7px 13px; border-radius: 7px;
+        border: 1px solid #48484a; font-weight: 600;
     }
-    QPushButton:hover {
-        background-color: #3b9ef8; /* etwas heller beim Hover */
-    }
-    QPushButton:pressed {
-        background-color: #1f6fcf; /* etwas dunkler beim Drücken */
-    }
+    QPushButton:hover { background-color: #48484a; }
+    QPushButton:pressed { background-color: #636366; }
+    QPushButton:disabled { background-color: #2c2c2e; color: #636366; border-color: #3a3a3c; }
 
-    /* Secondary-Buttons (grau, z.B. Manage, Copy Preview) */
-    QPushButton[secondary="true"] {
-        background-color: #6c757d;
-        color: white;
-        border: 1px solid #60666b;
-    }
-    QPushButton[secondary="true"]:hover {
-        background-color: #7a8085;
-    }
-    QPushButton[secondary="true"]:pressed {
-        background-color: #5a6165;
-    }
+    QPushButton[secondary="true"] { background-color: #3a3a3c; color: #d1d1d6; border: 1px solid #48484a; }
+    QPushButton[secondary="true"]:hover { background-color: #48484a; }
+    QPushButton[secondary="true"]:pressed { background-color: #636366; }
 
-    /* Undo (red) - objectName #undoBtn */
-    QPushButton#undoBtn {
-        background-color: #e74c3c;
-        color: white;
-        padding: 6px 10px;
-        border-radius: 4px;
-        border: 1px solid #c43b2a;
-    }
-    QPushButton#undoBtn:hover {
-        background-color: #ff6b5a;
-    }
-    QPushButton#undoBtn:pressed {
-        background-color: #c43b2a;
-    }
+    QPushButton#copyPreviewBtn { background-color: #0a84ff; color: #ffffff; border: 1px solid #0a84ff; padding: 8px 16px; }
+    QPushButton#copyPreviewBtn:hover { background-color: #409cff; border-color: #409cff; }
+    QPushButton#copyPreviewBtn:pressed { background-color: #0066cc; }
 
-    /* Edit Output (green) - objectName #editOutputBtn */
-    QPushButton#editOutputBtn {
-        background-color: #28a745;
-        color: white;
-        padding: 6px 10px;
-        border-radius: 4px;
-        border: 1px solid #1f7f34;
-    }
-    QPushButton#editOutputBtn:hover {
-        background-color: #36c05a;
-    }
-    QPushButton#editOutputBtn:pressed {
-        background-color: #1f7f34;
-    }
+    QPushButton#undoBtn { background-color: #3a2427; color: #ff6961; border: 1px solid #713238; }
+    QPushButton#undoBtn:hover { background-color: #51282d; }
+    QPushButton#undoBtn:pressed { background-color: #713238; }
 
-    QLabel { font-weight: 600; color: #f1f1f1; }
-    QToolTip { background: #ffffff; color: #000000; }
+    QPushButton#editOutputBtn { background-color: #243b2c; color: #63d471; border: 1px solid #356340; }
+    QPushButton#editOutputBtn:hover { background-color: #2c5137; }
+    QPushButton#editOutputBtn:pressed { background-color: #356340; }
+
+    QToolButton#formatToolButton {
+        background-color: #3a3a3c; color: #f5f5f7; border: 1px solid #48484a;
+        border-radius: 4px; padding: 2px 5px; min-width: 22px; max-width: 28px;
+        font-weight: 600;
+    }
+    QToolButton#formatToolButton:hover { background-color: #48484a; }
+    QToolButton#formatToolButton:checked { background-color: #0a84ff; border-color: #0a84ff; }
+
+    QLabel { color: #f5f5f7; }
+    QStatusBar { background: #242426; color: #a1a1a6; border-top: 1px solid #3a3a3c; }
+    QToolTip { background: #f5f5f7; color: #1c1c1e; border: 0; padding: 5px 7px; }
+    QScrollBar:vertical { background: transparent; width: 12px; margin: 2px; }
+    QScrollBar::handle:vertical { background: #636366; min-height: 28px; border-radius: 6px; }
+    QScrollBar::handle:vertical:hover { background: #8e8e93; }
+    QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
 """
 
 def load_procedures():
@@ -218,8 +214,161 @@ def save_trivial_names(mapping):
     except Exception:
         pass
 
+def load_reaction_learning():
+    if not REACTION_LEARNING_FILE.exists():
+        return {}
+    try:
+        with open(REACTION_LEARNING_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+def save_reaction_learning(mapping):
+    try:
+        with open(REACTION_LEARNING_FILE, "w", encoding="utf-8") as f:
+            json.dump(mapping, f, indent=2, ensure_ascii=False)
+    except Exception:
+        pass
+
+def chemical_signature(chemicals):
+    formulas = {
+        remove_subscript_unicode(str(chemical.get("formula", ""))).replace(" ", "").lower()
+        for chemical in chemicals
+        if chemical.get("formula")
+    }
+    return "|".join(sorted(formulas))
+
 def extract_placeholders(template_text):
     return list(dict.fromkeys(re.findall(r"\{([a-zA-Z0-9_]+)\}", template_text)))
+
+def suggest_reaction_index(chemicals, procedures, reaction_learning=None):
+    """Return the safest matching procedure index, or None when uncertain."""
+    if not chemicals or not procedures:
+        return None
+    reaction_learning = reaction_learning or {}
+    signature = chemical_signature(chemicals)
+    learned = reaction_learning.get(signature, {})
+    formula_source = " ".join(chemical.get("formula", "") for chemical in chemicals)
+    source = " ".join(
+        f"{chemical.get('formula', '')} {chemical.get('display', '')}".lower()
+        for chemical in chemicals
+    )
+    has_halogen = bool(re.search(r"Br|Cl|I", formula_source)) or bool(re.search(r"iod|halogen", source))
+    has_boron = bool(re.search(r"B(?=[A-Z]|$)|bor|borester|boronic", formula_source + " " + source))
+    has_lithium = bool(re.search(r"Li", formula_source)) or bool(re.search(r"buli|n-buli", source))
+    has_nitrogen = bool(re.search(r"N(?=[A-Z]|$)", formula_source)) or bool(re.search(r"amine|amino", source))
+    has_cobalt = bool(re.search(r"Co", formula_source))
+    scores = []
+    for index, procedure in enumerate(procedures):
+        name = procedure.get("name", "").lower()
+        procedure_id = str(procedure.get("id", ""))
+        score = 0
+        if "suzuki" in name and has_halogen and has_boron and not has_lithium:
+            score = 8
+        elif "miyaura" in name and has_halogen and has_boron:
+            score = 7
+        elif "borylation" in name and has_lithium and has_boron:
+            score = 9
+        elif "alkylation" in name and has_halogen and has_nitrogen:
+            score = 8
+        elif "trimerization" in name and len(chemicals) >= 3 and has_cobalt:
+            score = 8
+        score += min(int(learned.get(procedure_id, 0)), 3)
+        scores.append((score, index))
+    best_score, best_index = max(scores, default=(0, None))
+    return best_index if best_score >= 7 else None
+
+def _chemical_text(chemical):
+    return f"{chemical.get('formula', '')} {chemical.get('display', '')}".lower()
+
+def _chemical_role_score(role, chemical, procedure_name):
+    """Score a chemical for a placeholder; zero means no safe match."""
+    text = _chemical_text(chemical)
+    formula = remove_subscript_unicode(str(chemical.get("formula", "")))
+    role = role.lower()
+    procedure_name = procedure_name.lower()
+    is_halide = bool(re.search(r"br|cl|iod|brom|chlor", text, re.IGNORECASE))
+    is_boron = bool(re.search(r"bor|borester|boronic", text)) or bool(re.search(r"B(?=[A-Z]|$)", formula))
+    is_lithium = bool(re.search(r"buli|n-buli|lithium", text)) or bool(re.search(r"Li", formula))
+    is_nitrogen = bool(re.search(r"amine|amino|nitrogen", text)) or bool(re.search(r"N(?=[A-Z]|$)", formula))
+    is_catalyst = bool(re.search(r"catalyst|palladium|nickel|cobalt|pd|ni|co|cu", text))
+    is_base = bool(re.search(r"base|carbonate|hydroxide|phosphate|amine|triethylamine|tBuONa|tBuOK", text))
+
+    if role in {"c1", "c2"}:
+        if "suzuki" in procedure_name or "miyaura" in procedure_name:
+            wanted = is_halide if role == "c1" else is_boron
+            return 10 if wanted else 0
+        if "borylation" in procedure_name:
+            return 9 if role == "c1" and not is_boron and not is_lithium else 0
+        if "alkylation" in procedure_name:
+            wanted = is_nitrogen if role == "c1" else is_halide
+            return 8 if wanted else 0
+    elif role == "buli":
+        return 12 if is_lithium else 0
+    elif role == "borester":
+        return 12 if is_boron else 0
+    elif role == "catalyst":
+        return 8 if is_catalyst else 0
+    elif role == "base":
+        return 7 if is_base else 0
+    return 0
+
+def suggest_chemical_mapping(chemicals, placeholders, procedure, reaction_learning=None):
+    """Return only unambiguous automatic assignments for chemical placeholders."""
+    if not chemicals or not procedure:
+        return {}
+    procedure_name = str(procedure.get("name", ""))
+    signature = chemical_signature(chemicals)
+    learned = (reaction_learning or {}).get(signature, {})
+    procedure_id = str(procedure.get("id", ""))
+    learned_mapping = {}
+    if isinstance(learned, dict):
+        mappings_by_procedure = learned.get("__mapping_by_procedure__", {})
+        if isinstance(mappings_by_procedure, dict):
+            learned_mapping = mappings_by_procedure.get(procedure_id, {}) or {}
+        if not learned_mapping:
+            legacy_mapping = learned.get("__mapping__", {})
+            if isinstance(legacy_mapping, dict) and all(isinstance(value, str) for value in legacy_mapping.values()):
+                learned_mapping = legacy_mapping
+    available = list(chemicals)
+    product_reserved = any(placeholder.lower() == "product" for placeholder in placeholders)
+    if product_reserved and available:
+        available = available[:-1]
+    result = {}
+
+    for placeholder in placeholders:
+        if "solvent" in placeholder.lower():
+            continue
+        if placeholder.lower() == "product" and chemicals:
+            last_chemical = chemicals[-1]
+            result[placeholder] = last_chemical.get("display") or last_chemical.get("formula")
+            continue
+        learned_value = learned_mapping.get(placeholder)
+        if learned_value:
+            learned_match = next(
+                (c for c in available if c.get("display") == learned_value or c.get("formula") == learned_value),
+                None,
+            )
+            if learned_match is not None:
+                result[placeholder] = learned_match.get("display") or learned_match.get("formula")
+                available.remove(learned_match)
+                continue
+
+        scored = sorted(
+            ((_chemical_role_score(placeholder, chemical, procedure_name), chemical) for chemical in available),
+            key=lambda item: item[0],
+            reverse=True,
+        )
+        if not scored or scored[0][0] < 7:
+            continue
+        best_score, best = scored[0]
+        second_score = scored[1][0] if len(scored) > 1 else 0
+        if best_score == second_score:
+            continue
+        result[placeholder] = best.get("display") or best.get("formula")
+        available.remove(best)
+    return result
 
 # ---------------------------
 # Helpers: subscript mapping and others
@@ -314,6 +463,16 @@ _MARKUP_RE = re.compile(
 def render_markup_to_html(s: str) -> str:
     if s is None:
         return ""
+    bold_matches = list(re.finditer(r"(?is)<b>(.*?)</b>", s))
+    if bold_matches:
+        out = []
+        last = 0
+        for match in bold_matches:
+            out.append(render_markup_to_html(s[last:match.start()]))
+            out.append(f"<b>{render_markup_to_html(match.group(1))}</b>")
+            last = match.end()
+        out.append(render_markup_to_html(s[last:]))
+        return "".join(out)
     out = []
     last = 0
     for m in _MARKUP_RE.finditer(s):
@@ -349,6 +508,7 @@ def strip_markup_to_plain_ascii(s: str) -> str:
         return ""
     s = re.sub(r'(?i)<sub>\s*([^<]+?)\s*</sub>', r'\1', s)
     s = re.sub(r'(?i)<i>\s*([^<]+?)\s*</i>', r'\1', s)
+    s = re.sub(r'(?i)</?b>', '', s)
     s = re.sub(r'_\{\s*([^}]+)\s*\}', r'\1', s)
     s = re.sub(r'_([A-Za-z0-9])', r'\1', s)
     s = re.sub(r'/\{\s*([^}]+)\s*\}', r'\1', s)
@@ -370,7 +530,146 @@ def extract_text_elem(elem):
         return ""
     return "".join(elem.itertext()).strip()
 
+def _binary_cdx_semantic_values(formula, text_values):
+    """Map CDX table tokens by units so omitted columns cannot shift values."""
+    values = []
+    for value in text_values:
+        if (
+            values
+            and value in {"mg", "g", "mL", "M", "mmol", "mol", "%"}
+            and re.fullmatch(r"\d+[,.]\d+", values[-1])
+        ):
+            values[-1] = f"{values[-1]}{value}"
+        else:
+            values.append(value)
+
+    def number(value):
+        return bool(re.fullmatch(r"\d+[,.]\d+", value))
+
+    def has_unit(value, unit):
+        return bool(re.fullmatch(rf"\d+[,.]\d+\s*{unit}", value, re.IGNORECASE))
+
+    molecular_weight = next((value for value in values if number(value)), "")
+    flags = [index for index, value in enumerate(values) if value in {"Yes", "No"}]
+    flag_index = flags[0] if flags else -1
+    equivalent = next((value for value in values[flag_index + 1:] if number(value)), "")
+    masses = [value for value in values if has_unit(value, r"(?:mg|g)")]
+    amounts = [value for value in values if has_unit(value, r"(?:mmol|mol)")]
+    volumes = [value for value in values if has_unit(value, r"mL")]
+    percents = [value for value in values if has_unit(value, r"%")]
+    molarities = [value for value in values if has_unit(value, r"M")]
+    densities = [value for value in values if has_unit(value, r"g/mL")]
+
+    if not molecular_weight or not flag_index or not equivalent:
+        return None
+    result = [
+        formula,
+        molecular_weight,
+        amounts[0] if amounts else "",
+        values[flag_index],
+        equivalent,
+        masses[0] if masses else "",
+        percents[0] if percents else "",
+        molarities[0] if molarities else "",
+        densities[0] if densities else "",
+        volumes[0] if volumes else "",
+        amounts[-1] if amounts else "",
+        masses[-1] if masses else "",
+    ]
+    product_values = {
+        "mass": masses[-1] if masses else "",
+        "amount": amounts[-1] if amounts else "",
+        "yield": percents[-1] if percents else "",
+    }
+    return result, product_values
+
+def parse_binary_cdx_table(cdx_path):
+    headers = [
+        "Formula", "MW", "Limit Moles", "Limiting?", "Equivalents",
+        "Sample Mass", "%Weight", "Molarity", "Density", "Volume",
+        "Reactant Moles", "Reactant Mass",
+    ]
+    data = Path(cdx_path).read_bytes()
+    formula_matches = [
+        match for match in re.finditer(
+            rb"(?<![A-Za-z])(?:[A-Z][a-z]?\d*)+(?=\x00)", data,
+        )
+        if any(byte >= ord("0") and byte <= ord("9") for byte in match.group())
+    ]
+    if not formula_matches:
+        return []
+
+    components = []
+    for index, formula_match in enumerate(formula_matches):
+        formula = formula_match.group().decode("ascii", errors="ignore")
+        if formula == "CCs2O3":
+            formula = "Cs2CO3"
+        start = formula_match.end()
+        end = formula_matches[index + 1].start() if index + 1 < len(formula_matches) else len(data)
+        text_values = []
+        for text_match in re.finditer(rb"[ -~]{2,}", data[start:end]):
+            value = text_match.group().decode("latin1").strip()
+            if value:
+                text_values.append(value)
+
+        combined_values = []
+        unit_only = {"mg", "g", "mL", "M", "mmol", "mol", "%"}
+        for value in text_values:
+            if (
+                combined_values
+                and value in unit_only
+                and re.fullmatch(r"\d+[,.]\d+", combined_values[-1])
+            ):
+                combined_values[-1] = f"{combined_values[-1]}{value}"
+            else:
+                combined_values.append(value)
+        text_values = combined_values
+
+        semantic_result = _binary_cdx_semantic_values(formula, text_values)
+        if semantic_result is not None:
+            semantic_values, product_values = semantic_result
+            components.append({
+                "formula": formula,
+                "headers": headers,
+                "values": semantic_values,
+                "raw_fields": dict(zip(headers, semantic_values)),
+                "product_values": product_values,
+            })
+            continue
+
+        values = [formula]
+        for value in text_values:
+            if len(values) == 1 and re.fullmatch(r"\d+[,.]\d+", value):
+                values.append(value)
+            elif len(values) == 2 and re.search(r"(?:mmol|mol)$", value, re.IGNORECASE):
+                values.append(value)
+            elif len(values) == 3 and value in {"Yes", "No"}:
+                values.append(value)
+            elif len(values) == 3 and re.fullmatch(r"\d+[,.]\d+", value):
+                values.append(value)
+            elif len(values) >= 4 and len(values) < len(headers):
+                if value == "mL" and values[-1].endswith("g"):
+                    values[-1] += "/mL"
+                elif (
+                    re.fullmatch(r"\d+[,.]\d+\s*(?:mg|g|mL|M|mmol|mol|%|g/mL)", value, re.IGNORECASE)
+                    or (len(values) == 4 and re.fullmatch(r"\d+[,.]\d+", value))
+                    or value in {"Yes", "No"}
+                ):
+                    values.append(value)
+
+        if len(values) >= 3:
+            values.extend([""] * (len(headers) - len(values)))
+            components.append({
+                "formula": formula,
+                "headers": headers,
+                "values": values[:len(headers)],
+                "raw_fields": dict(zip(headers, values[:len(headers)])),
+            })
+    return components
+
 def parse_stoichiometry_components(cdxml_path):
+    if Path(cdxml_path).suffix.lower() == ".cdx":
+        return parse_binary_cdx_table(cdxml_path)
     try:
         tree = ET.parse(cdxml_path)
     except ET.ParseError as e:
@@ -439,15 +738,15 @@ def find_cdxml_files(root_folder):
     cdxml_files = []
     for dirpath, _, filenames in os.walk(root_folder):
         for fname in filenames:
-            if fname.lower().endswith((".cdxml", ".xml")):
+            if fname.lower().endswith((".cdx", ".cdxml", ".xml")):
                 full = os.path.join(dirpath, fname)
                 try:
                     with open(full, "rb") as fh:
                         head = fh.read(400).lower()
-                    if b"cdxml" in head or b"chem" in head or fname.lower().endswith(".cdxml"):
+                    if b"cdx" in head or b"cdxml" in head or b"chem" in head or fname.lower().endswith((".cdx", ".cdxml")):
                         cdxml_files.append(full)
                 except Exception:
-                    if fname.lower().endswith(".cdxml"):
+                    if fname.lower().endswith((".cdx", ".cdxml")):
                         cdxml_files.append(full)
     return cdxml_files
 
@@ -577,6 +876,11 @@ def format_component_display_by_index(component, is_last=False):
         # For last row show "row1 (row9, row10, row11)" as requested.
         # For row1 we keep subscripted formula-like display (row0 may be a formula)
         row1_label = subscript_digits(row0_raw) if row0_raw else formula_display or formula_raw
+        product_values = component.get("product_values", {})
+        if product_values:
+            row9_disp = process_disp(product_values.get("mass", ""))
+            row10_disp = process_disp(product_values.get("amount", ""))
+            row11_disp = process_disp(product_values.get("yield", ""))
         bracket_parts = []
         for part in (row9_disp, row10_disp, row11_disp):
             if part:
@@ -626,15 +930,18 @@ class DraggableListWidget(QtWidgets.QListWidget):
 
 class PreviewText(QtWidgets.QTextEdit):
     dropped = QtCore.Signal(str, QtCore.QPoint)
+    drag_hovered = QtCore.Signal(str, QtCore.QPoint)
+    drag_left = QtCore.Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setReadOnly(True)
+        self.setReadOnly(False)
         self.setAcceptDrops(True)
 
     def dragEnterEvent(self, event):
         md = event.mimeData()
         if md.hasText() or md.hasHtml():
+            event.setDropAction(QtCore.Qt.CopyAction)
             event.acceptProposedAction()
         else:
             event.ignore()
@@ -642,9 +949,17 @@ class PreviewText(QtWidgets.QTextEdit):
     def dragMoveEvent(self, event):
         md = event.mimeData()
         if md.hasText() or md.hasHtml():
+            event.setDropAction(QtCore.Qt.CopyAction)
+            text = md.text() if md.hasText() else md.html()
+            pos = event.position().toPoint() if hasattr(event, 'position') else event.pos()
+            self.drag_hovered.emit(text, pos)
             event.acceptProposedAction()
         else:
             event.ignore()
+
+    def dragLeaveEvent(self, event):
+        self.drag_left.emit()
+        super().dragLeaveEvent(event)
 
     def dropEvent(self, event):
         md = event.mimeData()
@@ -654,7 +969,8 @@ class PreviewText(QtWidgets.QTextEdit):
         text = md.text() if md.hasText() else md.html()
         pos = event.position().toPoint() if hasattr(event, 'position') else event.pos()
         self.dropped.emit(text, pos)
-        event.acceptProposedAction()
+        event.setDropAction(QtCore.Qt.CopyAction)
+        event.accept()
 
 # ---------------------------
 # Remaining dialogs (inherit app stylesheet)
@@ -693,13 +1009,21 @@ class SolventManagerDialog(QtWidgets.QDialog):
         add_btn = QtWidgets.QPushButton("Add")
         edit_btn = QtWidgets.QPushButton("Edit")
         del_btn = QtWidgets.QPushButton("Delete")
+        up_btn = QtWidgets.QPushButton("↑")
+        down_btn = QtWidgets.QPushButton("↓")
+        up_btn.setToolTip("Move selected solvent up")
+        down_btn.setToolTip("Move selected solvent down")
         btn_layout.addWidget(add_btn)
         btn_layout.addWidget(edit_btn)
         btn_layout.addWidget(del_btn)
+        btn_layout.addWidget(up_btn)
+        btn_layout.addWidget(down_btn)
         layout.addLayout(btn_layout)
         add_btn.clicked.connect(self.add_solvent)
         edit_btn.clicked.connect(self.edit_solvent)
         del_btn.clicked.connect(self.delete_solvent)
+        up_btn.clicked.connect(self.move_up)
+        down_btn.clicked.connect(self.move_down)
         close_btn = QtWidgets.QPushButton("Close")
         close_btn.clicked.connect(self.accept)
         layout.addWidget(close_btn)
@@ -737,6 +1061,22 @@ class SolventManagerDialog(QtWidgets.QDialog):
         if confirm == QtWidgets.QMessageBox.StandardButton.Yes:
             del self.solvents[idx]
             self.refresh_list()
+
+    def move_up(self):
+        idx = self.list_widget.currentRow()
+        if idx <= 0 or idx >= len(self.solvents):
+            return
+        self.solvents[idx - 1], self.solvents[idx] = self.solvents[idx], self.solvents[idx - 1]
+        self.refresh_list()
+        self.list_widget.setCurrentRow(idx - 1)
+
+    def move_down(self):
+        idx = self.list_widget.currentRow()
+        if idx < 0 or idx >= len(self.solvents) - 1:
+            return
+        self.solvents[idx], self.solvents[idx + 1] = self.solvents[idx + 1], self.solvents[idx]
+        self.refresh_list()
+        self.list_widget.setCurrentRow(idx + 1)
 
 class ProcedureEditorDialog(QtWidgets.QDialog):
     def __init__(self, parent=None, procedure=None):
@@ -1048,6 +1388,80 @@ class AssignedMappingDialog(QtWidgets.QDialog):
         cb = QtWidgets.QApplication.clipboard()
         cb.setText("\n".join(lines))
 
+class LearningManagementDialog(QtWidgets.QDialog):
+    def __init__(self, parent=None, learning=None, procedures=None):
+        super().__init__(parent)
+        self.setWindowTitle("Learning Management")
+        self.resize(760, 420)
+        self.learning = learning if isinstance(learning, dict) else {}
+        self.procedure_names = {
+            str(procedure.get("id", "")): procedure.get("name", "<unnamed procedure>")
+            for procedure in (procedures or [])
+        }
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.addWidget(QtWidgets.QLabel("Learned reaction and chemical assignments"))
+        self.list_widget = QtWidgets.QListWidget()
+        layout.addWidget(self.list_widget, 1)
+        button_row = QtWidgets.QHBoxLayout()
+        delete_btn = QtWidgets.QPushButton("Delete Selected")
+        reset_btn = QtWidgets.QPushButton("Reset All")
+        button_row.addWidget(delete_btn)
+        button_row.addWidget(reset_btn)
+        button_row.addStretch()
+        layout.addLayout(button_row)
+        close_btn = QtWidgets.QPushButton("Close")
+        close_btn.clicked.connect(self.accept)
+        layout.addWidget(close_btn)
+        delete_btn.clicked.connect(self.delete_selected)
+        reset_btn.clicked.connect(self.reset_all)
+        self.refresh_list()
+
+    def refresh_list(self):
+        self.list_widget.clear()
+        for signature, record in sorted(self.learning.items()):
+            if not isinstance(record, dict):
+                continue
+            procedure_ids = set(record.get("__mapping_by_procedure__", {}))
+            procedure_ids.update(key for key in record if not key.startswith("__"))
+            for procedure_id in sorted(procedure_ids):
+                mapping = record.get("__mapping_by_procedure__", {}).get(procedure_id, {})
+                reaction_score = record.get(procedure_id, 0)
+                procedure_name = self.procedure_names.get(procedure_id, procedure_id)
+                roles = ", ".join(f"{key}={value}" for key, value in sorted(mapping.items()))
+                label = f"{procedure_name} | {signature} | score {reaction_score}"
+                if roles:
+                    label += f" | {roles}"
+                item = QtWidgets.QListWidgetItem(label)
+                item.setData(QtCore.Qt.UserRole, (signature, procedure_id))
+                self.list_widget.addItem(item)
+
+    def delete_selected(self):
+        item = self.list_widget.currentItem()
+        if not item:
+            return
+        signature, procedure_id = item.data(QtCore.Qt.UserRole)
+        record = self.learning.get(signature, {})
+        if isinstance(record, dict):
+            record.pop(procedure_id, None)
+            mappings = record.get("__mapping_by_procedure__", {})
+            if isinstance(mappings, dict):
+                mappings.pop(procedure_id, None)
+                if not mappings:
+                    record.pop("__mapping_by_procedure__", None)
+            if not any(not key.startswith("__") for key in record):
+                self.learning.pop(signature, None)
+        self.refresh_list()
+
+    def reset_all(self):
+        if not self.learning:
+            return
+        confirm = QtWidgets.QMessageBox.question(
+            self, "Reset learning", "Delete all learned assignments and reaction history?"
+        )
+        if confirm == QtWidgets.QMessageBox.StandardButton.Yes:
+            self.learning.clear()
+            self.refresh_list()
+
 class DropArea(QtWidgets.QWidget):
     filesDropped = QtCore.Signal(list)
     def __init__(self, parent=None):
@@ -1092,10 +1506,14 @@ class MainWindow(QtWidgets.QMainWindow):
         self.procedures = load_procedures()
         self.solvents = load_solvents()
         self.trivial_names = load_trivial_names()
+        self.reaction_learning = load_reaction_learning()
         self.chemicals = []
         self.mapping = {}
+        self.automatic_mapping = set()
         self.last_rendered_markup = ""
         self.current_template = ""
+        self._preview_internal_update = False
+        self._saved_preview_cursor = None
         self.preview_font_pt = None
         # history of (mapping, last_rendered_markup)
         self.state_history = []
@@ -1131,6 +1549,10 @@ class MainWindow(QtWidgets.QMainWindow):
         manage_act = QtGui.QAction("Manage Procedures...", self)
         manage_act.triggered.connect(self.open_procedure_manager)
         procedures_menu.addAction(manage_act)
+        learning_menu = men.addMenu("Learning")
+        manage_learning_act = QtGui.QAction("Manage Learned Assignments...", self)
+        manage_learning_act.triggered.connect(self.open_learning_manager)
+        learning_menu.addAction(manage_learning_act)
         solvents_act = QtGui.QAction("Solvents", self)
         solvents_act.triggered.connect(self.open_solvent_manager)
         men.addAction(solvents_act)
@@ -1155,13 +1577,13 @@ class MainWindow(QtWidgets.QMainWindow):
         left_layout = QtWidgets.QVBoxLayout(left_frame)
         left_layout.setSpacing(10)
 
-        left_layout.addWidget(QtWidgets.QLabel("Chemicals (from CDXML)"))
+        left_layout.addWidget(QtWidgets.QLabel("Chemicals (from CDX/CDXML)"))
         self.chem_list = DraggableListWidget()
-        left_layout.addWidget(self.chem_list, 3)
+        left_layout.addWidget(self.chem_list, 1)
 
         left_layout.addWidget(QtWidgets.QLabel("Solvents"))
         self.solv_list = DraggableListWidget()
-        left_layout.addWidget(self.solv_list, 1)
+        left_layout.addWidget(self.solv_list, 2)
 
         # Bottom-left Load button removed per request; keep only Manage button
         left_btn_row = QtWidgets.QHBoxLayout()
@@ -1179,6 +1601,7 @@ class MainWindow(QtWidgets.QMainWindow):
         proc_row = QtWidgets.QHBoxLayout()
         proc_row.addWidget(QtWidgets.QLabel("Procedure:"))
         self.proc_combo = QtWidgets.QComboBox()
+        self.proc_combo.setMaxVisibleItems(12)
         # Verbindung hinzufügen: bei Auswahländerung sofort on_proc_changed aufrufen
         self.proc_combo.currentIndexChanged.connect(self.on_proc_changed)
         proc_row.addWidget(self.proc_combo, 1)
@@ -1190,16 +1613,20 @@ class MainWindow(QtWidgets.QMainWindow):
 
         right_layout.addLayout(proc_row)
 
-        right_layout.addWidget(QtWidgets.QLabel("Placeholders (click to assign)"))
-        self.placeholders_list = QtWidgets.QListWidget()
-        # Make placeholder area larger per user request
-        self.placeholders_list.setMinimumHeight(180)
-        self.placeholders_list.setMaximumHeight(280)
-        self.placeholders_list.itemClicked.connect(self.on_placeholder_clicked)
-        right_layout.addWidget(self.placeholders_list)
-
         preview_lbl = QtWidgets.QLabel("Preview")
         right_layout.addWidget(preview_lbl)
+
+        format_row = QtWidgets.QHBoxLayout()
+        format_row.setSpacing(4)
+        self.bold_btn = self._create_format_button("B", "Bold", self.toggle_bold)
+        self.italic_btn = self._create_format_button("I", "Italic", self.toggle_italic)
+        self.superscript_btn = self._create_format_button("x²", "Superscript", self.toggle_superscript)
+        self.subscript_btn = self._create_format_button("x₂", "Subscript", self.toggle_subscript)
+        format_row.addStretch(1)
+        for button in (self.bold_btn, self.italic_btn, self.superscript_btn, self.subscript_btn):
+            format_row.addWidget(button)
+        right_layout.addLayout(format_row)
+
         self.preview = PreviewText()
         font = self.preview.font()
         base = font.pointSize()
@@ -1207,11 +1634,17 @@ class MainWindow(QtWidgets.QMainWindow):
             base = QtWidgets.QApplication.font().pointSize()
             if base <= 0:
                 base = 12
-        font.setPointSize(base + 2)
+        preview_size = max(base + 5, 14)
+        font.setPointSize(preview_size)
         self.preview.setFont(font)
-        self.preview_font_pt = base + 2
+        self.preview_font_pt = preview_size
         # ensure objectNames for styled buttons (set later when creating buttons)
         self.preview.dropped.connect(self.on_preview_dropped)
+        self.preview.drag_hovered.connect(self.on_preview_drag_hovered)
+        self.preview.drag_left.connect(self.clear_preview_drag_hover)
+        self.preview.textChanged.connect(self.on_preview_text_edited)
+        self.preview.cursorPositionChanged.connect(self.update_format_buttons)
+        self.preview.selectionChanged.connect(self.update_format_buttons)
         right_layout.addWidget(self.preview, 1)
 
         bottom_h = QtWidgets.QHBoxLayout()
@@ -1226,8 +1659,7 @@ class MainWindow(QtWidgets.QMainWindow):
         bottom_h.addWidget(undo_btn)
 
         copy_preview_btn = QtWidgets.QPushButton("Copy Preview")
-        # copy preview grey - same as Manage button (uses secondary)
-        copy_preview_btn.setProperty("secondary", True)
+        copy_preview_btn.setObjectName("copyPreviewBtn")
         copy_preview_btn.clicked.connect(self.copy_preview_to_clipboard)
         bottom_h.addWidget(copy_preview_btn)
 
@@ -1271,8 +1703,8 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def load_cdmxl(self):
         fpath, _ = QtWidgets.QFileDialog.getOpenFileName(
-            self, "Open CDMXL file (or cancel to choose folder)", str(Path.cwd()),
-            "CDMXL Files (*.cdxml *.xml);;All files (*)"
+            self, "Open ChemDraw file (or cancel to choose folder)", str(Path.cwd()),
+            "ChemDraw Files (*.cdx *.cdxml *.xml);;All files (*)"
         )
         if fpath:
             self.load_cdxml_paths([fpath])
@@ -1294,6 +1726,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
             # Entferne alle aktuellen Assignments (keine Undo-Pushes - bereits oben gepusht)
             self.mapping = {}
+            self.automatic_mapping.clear()
             self.last_rendered_markup = ""
             # Clear preview widget content
             if hasattr(self, "preview") and self.preview is not None:
@@ -1332,7 +1765,7 @@ class MainWindow(QtWidgets.QMainWindow):
                     to_parse.extend(found)
         to_parse = list(dict.fromkeys(to_parse))
         if not to_parse:
-            QtWidgets.QMessageBox.information(self, "No files", "No CDXML/XML files found in the dropped items.")
+            QtWidgets.QMessageBox.information(self, "No files", "No CDX/CDXML/XML files found in the dropped items.")
             return
         components_all = []
         for file in to_parse:
@@ -1378,10 +1811,21 @@ class MainWindow(QtWidgets.QMainWindow):
             self.chem_list.addItem(c["display"])
         self.statusBar().showMessage(f"Loaded {len(self.chemicals)} candidate chemicals", 5000)
 
+        suggested_index = suggest_reaction_index(
+            self.chemicals,
+            self.procedures,
+            self.reaction_learning,
+        )
+        if suggested_index is not None and suggested_index != self.proc_combo.currentIndex():
+            self.proc_combo.setCurrentIndex(suggested_index)
+            suggested_name = self.proc_combo.itemText(suggested_index)
+            self.statusBar().showMessage(f"Suggested reaction: {suggested_name}", 6000)
+
         # Ensure assignments remain cleared and preview shows the template with placeholders unfilled.
         # (If a procedure/template is selected, render it with placeholders unassigned)
         try:
             self.mapping = {}
+            self.apply_automatic_mapping()
             # render the current template (will show placeholders as {name} if unassigned)
             self.render_preview()
             self.refresh_mapping_list()
@@ -1418,6 +1862,16 @@ class MainWindow(QtWidgets.QMainWindow):
             save_procedures(self.procedures)
             self.reload_procedures()
 
+    def open_learning_manager(self):
+        dlg = LearningManagementDialog(
+            self,
+            learning=self.reaction_learning,
+            procedures=self.procedures,
+        )
+        if dlg.exec() == QtWidgets.QDialog.Accepted:
+            save_reaction_learning(self.reaction_learning)
+            self.statusBar().showMessage("Learning data updated", 3000)
+
     def on_proc_changed(self, idx):
         p = self.proc_combo.currentData()
         if not p:
@@ -1428,16 +1882,59 @@ class MainWindow(QtWidgets.QMainWindow):
         phs = extract_placeholders(self.current_template)
         self.placeholders = phs
         self.mapping = {}
-        if hasattr(self, "placeholders_list"):
-            self.placeholders_list.clear()
-            for ph in phs:
-                item = QtWidgets.QListWidgetItem(ph)
-                self.placeholders_list.addItem(item)
+        self.automatic_mapping.clear()
+        self.apply_automatic_mapping()
+        self.refresh_placeholders_list()
         # render preview immediately
         self.render_preview()
 
+    def apply_automatic_mapping(self):
+        procedure = self.proc_combo.currentData()
+        automatic = suggest_chemical_mapping(
+            getattr(self, "chemicals", []),
+            getattr(self, "placeholders", []),
+            procedure,
+            self.reaction_learning,
+        )
+        self.mapping.update(automatic)
+        self.automatic_mapping.update(automatic)
+        self.refresh_placeholders_list()
+
+    def refresh_placeholders_list(self):
+        if not hasattr(self, "placeholders_list"):
+            return
+        self.placeholders_list.clear()
+        for placeholder in getattr(self, "placeholders", []) or []:
+            item = QtWidgets.QListWidgetItem(f"{{{placeholder}}}")
+            item.setData(QtCore.Qt.UserRole, placeholder)
+            self.placeholders_list.addItem(item)
+
+    def learn_chemical_mapping(self, signature, procedure_id):
+        if not signature or not procedure_id:
+            return False
+        assigned = {
+            placeholder: value
+            for placeholder, value in self.mapping.items()
+            if placeholder in getattr(self, "placeholders", [])
+            and value
+            and "solvent" not in placeholder.lower()
+        }
+        if not assigned:
+            return False
+        learned_for_signature = self.reaction_learning.setdefault(signature, {})
+        mappings_by_procedure = learned_for_signature.setdefault("__mapping_by_procedure__", {})
+        learned_mapping = mappings_by_procedure.setdefault(str(procedure_id), {})
+        changed = False
+        for placeholder, value in assigned.items():
+            if learned_mapping.get(placeholder) != value:
+                learned_mapping[placeholder] = value
+                changed = True
+        if changed:
+            save_reaction_learning(self.reaction_learning)
+        return changed
+
     def on_placeholder_clicked(self, item):
-        placeholder = item.text()
+        placeholder = item.data(QtCore.Qt.UserRole) or item.text().strip("{}")
 
         dlg = QtWidgets.QDialog(self)
         dlg.setWindowTitle(f"Assign chemical to {{{placeholder}}}")
@@ -1487,8 +1984,10 @@ class MainWindow(QtWidgets.QMainWindow):
                     del self.mapping[placeholder]
             elif "──" not in text:  # ignore separators
                 self.mapping[placeholder] = text
+                self.automatic_mapping.discard(placeholder)
 
             self.render_preview()
+            self.refresh_placeholders_list()
             dlg.accept()  # close instantly
 
         listw.itemClicked.connect(on_item_clicked)
@@ -1502,24 +2001,127 @@ class MainWindow(QtWidgets.QMainWindow):
     def render_preview(self):
         if not hasattr(self, "current_template"):
             return
+        rendered = self._render_markup(self.mapping)
+        self.last_rendered_markup = rendered
+        self.update_preview_from_markup(rendered, highlight_mapping=self.mapping)
+        self.refresh_mapping_list()
+
+    def _render_markup(self, mapping):
         text = self.current_template
         def repl(m):
             key = m.group(1)
-            return self.mapping.get(key, f"{{{key}}}")
-        rendered = re.sub(r"\{([a-zA-Z0-9_]+)\}", repl, text)
-        self.last_rendered_markup = rendered
-        self.update_preview_from_markup(rendered)
-        self.refresh_mapping_list()
+            return mapping.get(key, f"{{{key}}}")
+        return re.sub(r"\{([a-zA-Z0-9_]+)\}", repl, text)
 
-    def update_preview_from_markup(self, markup):
-        paragraphs = []
-        font_pt = self.preview_font_pt or 14
-        for line in markup.splitlines() or [""]:
-            frag = render_markup_to_html(line)
-            paragraphs.append(f'<p style="font-size:{font_pt}pt; text-align:justify; line-height:1.5; margin:0 0 6px 0;">{frag}</p>')
-        html_full = "<html><body>" + "".join(paragraphs) + "</body></html>"
+    def update_preview_from_markup(self, markup, highlight_mapping=None):
         if hasattr(self, "preview"):
-            self.preview.setHtml(html_full)
+            self._preview_internal_update = True
+            try:
+                self.preview.setHtml(
+                    self._build_preview_html(
+                        markup,
+                        word_compatible=False,
+                        highlight_mapping=highlight_mapping,
+                    )
+                )
+            finally:
+                self._preview_internal_update = False
+
+    def _preview_document_to_markup(self):
+        lines = []
+        block = self.preview.document().begin()
+        while block.isValid():
+            parts = []
+            fragment = block.begin()
+            while fragment != block.end():
+                text = fragment.fragment().text()
+                char_format = fragment.fragment().charFormat()
+                if char_format.verticalAlignment() == QtGui.QTextCharFormat.AlignSubScript:
+                    text = f"<sub>{text}</sub>"
+                if char_format.fontItalic():
+                    text = f"<i>{text}</i>"
+                if char_format.fontWeight() >= QtGui.QFont.Bold:
+                    text = f"<b>{text}</b>"
+                parts.append(text)
+                fragment += 1
+            lines.append("".join(parts))
+            block = block.next()
+        return "\n".join(lines)
+
+    def on_preview_text_edited(self):
+        if self._preview_internal_update:
+            return
+        self.last_rendered_markup = self._preview_document_to_markup()
+
+    def _create_format_button(self, label, tooltip, slot):
+        button = QtWidgets.QToolButton()
+        button.setObjectName("formatToolButton")
+        button.setText(label)
+        button.setToolTip(tooltip)
+        button.setCheckable(True)
+        if label == "I":
+            font = button.font()
+            font.setItalic(True)
+            button.setFont(font)
+        button.pressed.connect(self.remember_preview_cursor)
+        button.clicked.connect(slot)
+        return button
+
+    def remember_preview_cursor(self):
+        if hasattr(self, "preview"):
+            self._saved_preview_cursor = QtGui.QTextCursor(self.preview.textCursor())
+
+    def _merge_preview_format(self, char_format):
+        cursor = self._saved_preview_cursor or self.preview.textCursor()
+        if cursor.hasSelection():
+            cursor.mergeCharFormat(char_format)
+            self.preview.setTextCursor(cursor)
+        else:
+            self.preview.mergeCurrentCharFormat(char_format)
+        self._saved_preview_cursor = None
+        self.update_format_buttons()
+
+    def _toggle_preview_format(self, kind, checked):
+        char_format = QtGui.QTextCharFormat()
+        if kind == "bold":
+            char_format.setFontWeight(QtGui.QFont.Bold if checked else QtGui.QFont.Normal)
+        elif kind == "italic":
+            char_format.setFontItalic(checked)
+        else:
+            char_format.setVerticalAlignment(
+                QtGui.QTextCharFormat.AlignSuperScript
+                if kind == "superscript" and checked
+                else QtGui.QTextCharFormat.AlignSubScript
+                if kind == "subscript" and checked
+                else QtGui.QTextCharFormat.AlignNormal
+            )
+        if checked and kind == "superscript":
+            self.subscript_btn.setChecked(False)
+        elif checked and kind == "subscript":
+            self.superscript_btn.setChecked(False)
+        self._merge_preview_format(char_format)
+
+    def toggle_bold(self, checked=False):
+        self._toggle_preview_format("bold", checked)
+
+    def toggle_italic(self, checked=False):
+        self._toggle_preview_format("italic", checked)
+
+    def toggle_superscript(self, checked=False):
+        self._toggle_preview_format("superscript", checked)
+
+    def toggle_subscript(self, checked=False):
+        self._toggle_preview_format("subscript", checked)
+
+    def update_format_buttons(self):
+        if not hasattr(self, "preview"):
+            return
+        char_format = self.preview.textCursor().charFormat()
+        self.bold_btn.setChecked(char_format.fontWeight() >= QtGui.QFont.Bold)
+        self.italic_btn.setChecked(char_format.fontItalic())
+        alignment = char_format.verticalAlignment()
+        self.superscript_btn.setChecked(alignment == QtGui.QTextCharFormat.AlignSuperScript)
+        self.subscript_btn.setChecked(alignment == QtGui.QTextCharFormat.AlignSubScript)
 
     def open_edit_output_dialog(self):
         if not getattr(self, "last_rendered_markup", "").strip():
@@ -1544,17 +2146,98 @@ class MainWindow(QtWidgets.QMainWindow):
             return f"<sub>{ascii_digits}</sub>"
         return pattern.sub(repl, s)
 
+    def _build_preview_html(self, markup: str, word_compatible: bool = False, highlight_mapping=None) -> str:
+        markup_for_html = self._convert_unicode_subs_to_html_subs(markup or "")
+        paragraphs = []
+        font_pt = self.preview_font_pt or 14
+        font_style = "" if word_compatible else "font-family:Calibri, Arial, sans-serif; "
+        for line in markup_for_html.splitlines() or [""]:
+            frag = render_markup_to_html(line)
+            if highlight_mapping is not None and not word_compatible:
+                for placeholder, value in sorted(
+                    highlight_mapping.items(), key=lambda item: len(str(item[1])), reverse=True
+                ):
+                    if not value:
+                        continue
+                    value_html = render_markup_to_html(
+                        self._convert_unicode_subs_to_html_subs(str(value))
+                    )
+                    if value_html not in frag:
+                        continue
+                    color = "#163d63" if placeholder in self.automatic_mapping else "#1d4930"
+                    border = "#0a84ff" if placeholder in self.automatic_mapping else "#63d471"
+                    highlight = (
+                        f'<span style="background-color:{color}; border:1px solid {border}; '
+                        f'border-radius:3px; padding:1px 3px;">{value_html}</span>'
+                    )
+                    frag = frag.replace(value_html, highlight)
+                assigned_placeholders = {
+                    placeholder for placeholder, value in highlight_mapping.items() if value
+                }
+                for placeholder in getattr(self, "placeholders", []) or []:
+                    if placeholder in assigned_placeholders:
+                        continue
+                    token = html_std.escape(f"{{{placeholder}}}")
+                    if token in frag:
+                        frag = frag.replace(
+                            token,
+                            '<span style="background-color:#5a3a16; border:1px solid #f0a34a; '
+                            f'border-radius:3px; padding:1px 3px; color:#ffd39a;">{token}</span>',
+                        )
+            paragraphs.append(
+                f'<p style="{font_style}font-size:{font_pt}pt; '
+                f'text-align:justify; line-height:1.5; margin:0 0 6px 0;">{frag}</p>'
+            )
+        body = "".join(paragraphs)
+        if word_compatible:
+            return (
+                '<!DOCTYPE html><html><head><meta charset="utf-8"></head>'
+                '<body><!--StartFragment-->' + body + '<!--EndFragment--></body></html>'
+            )
+        return "<html><body>" + body + "</body></html>"
+
+    def _build_preview_rtf(self, markup: str) -> str:
+        def escape_rtf(text: str) -> str:
+            escaped = []
+            for char in text:
+                if char in "\\{}":
+                    escaped.append("\\" + char)
+                elif char == "\n":
+                    escaped.append(r"\line ")
+                elif ord(char) > 127:
+                    escaped.append(f"\\u{ord(char)}?")
+                else:
+                    escaped.append(char)
+            return "".join(escaped)
+
+        parts = [r"{\rtf1\ansi\deff0\uc1{\fonttbl{\f0\fnil ;}} "]
+        for line_index, line in enumerate((markup or "").splitlines() or [""]):
+            last = 0
+            for match in _MARKUP_RE.finditer(line):
+                start, end = match.span()
+                parts.append(escape_rtf(line[last:start]))
+                if match.group(1):
+                    inner = re.sub(r"(?i)^<sub>\s*|\s*</sub>$", "", match.group(1))
+                    parts.append(r"{\sub " + escape_rtf(inner) + "}")
+                elif match.group(2) or match.group(3):
+                    inner = match.group(2) or match.group(3)
+                    parts.append(r"{\sub " + escape_rtf(inner) + "}")
+                elif match.group(4) or match.group(5):
+                    inner = match.group(4) or match.group(5)
+                    parts.append(r"{\i " + escape_rtf(inner) + "}")
+                last = end
+            parts.append(escape_rtf(line[last:]))
+            if line_index < len((markup or "").splitlines()) - 1:
+                parts.append(r"\line ")
+        parts.append("}")
+        return "".join(parts)
+
     def copy_preview_to_clipboard(self):
+        self.convert_preview_formulas_to_names(show_success_popup=False)
         markup = getattr(self, "last_rendered_markup", "") or ""
         if not markup.strip():
             return
-        markup_for_html = self._convert_unicode_subs_to_html_subs(markup)
-        paragraphs = []
-        font_pt = self.preview_font_pt or 14
-        for line in markup_for_html.splitlines() or [""]:
-            frag = render_markup_to_html(line)
-            paragraphs.append(f'<p style="font-size:{font_pt}pt; text-align:justify; line-height:1.5; margin:0 0 6px 0;">{frag}</p>')
-        html_full = f"<html><body>{''.join(paragraphs)}</body></html>"
+        html_full = self._build_preview_html(markup, word_compatible=True)
         plain_lines = []
         for line in markup.splitlines() or [""]:
             ascii_line = remove_subscript_unicode(line)
@@ -1563,9 +2246,26 @@ class MainWindow(QtWidgets.QMainWindow):
         plain_ascii = "\n".join(plain_lines)
         mime = QtCore.QMimeData()
         mime.setHtml(html_full)
+        mime.setData("text/rtf", QtCore.QByteArray(self._build_preview_rtf(markup).encode("ascii")))
         mime.setText(plain_ascii)
         cb = QtWidgets.QApplication.clipboard()
         cb.setMimeData(mime)
+
+        procedure = self.proc_combo.currentData()
+        procedure_id = procedure.get("id") if isinstance(procedure, dict) else None
+        signature = chemical_signature(getattr(self, "chemicals", []))
+        if procedure_id and signature:
+            learned_for_signature = self.reaction_learning.setdefault(signature, {})
+            learned_for_signature[procedure_id] = min(
+                int(learned_for_signature.get(procedure_id, 0)) + 1,
+                3,
+            )
+            save_reaction_learning(self.reaction_learning)
+            mapping_changed = self.learn_chemical_mapping(signature, procedure_id)
+            learned_message = " and chemical assignments" if mapping_changed else ""
+            self.statusBar().showMessage(
+                f"Reaction selection{learned_message} learned from copied preview", 4000
+            )
 
     def export_word(self):
         markup = getattr(self, "last_rendered_markup", "") or ""
@@ -1580,7 +2280,8 @@ class MainWindow(QtWidgets.QMainWindow):
             r'|_(?P<brace_sub>\{([^}]+)\})'
             r'|_(?P<single_sub>[A-Za-z0-9])'
             r'|/(?P<brace_i>\{([^}]+)\})'
-            r'|/(?P<single_i>[A-Za-z0-9])',
+            r'|/(?P<single_i>[A-Za-z0-9])'
+            r'|(?P<htmlbold><b>\s*([^<]+?)\s*</b>)',
             flags=re.IGNORECASE | re.DOTALL
         )
         try:
@@ -1604,7 +2305,15 @@ class MainWindow(QtWidgets.QMainWindow):
                     if m.start() > last:
                         txt = line[last:m.start()]
                         p.add_run(txt)
-                    if m.group('htmlsub'):
+                    if m.group('htmlbold'):
+                        inner = re.sub(r'(?i)^<b>\s*', '', m.group('htmlbold'))
+                        inner = re.sub(r'(?i)\s*</b>$', '', inner)
+                        run = p.add_run(inner)
+                        try:
+                            run.bold = True
+                        except Exception:
+                            pass
+                    elif m.group('htmlsub'):
                         inner = re.sub(r'(?i)^<sub>\s*', '', m.group('htmlsub'))
                         inner = re.sub(r'(?i)\s*</sub>$', '', inner)
                         run = p.add_run(inner)
@@ -1661,16 +2370,19 @@ class MainWindow(QtWidgets.QMainWindow):
             # push current state for undo, then copy returned mapping
             self.push_state()
             self.mapping = dlg.mapping
+            self.automatic_mapping.difference_update(self.mapping)
             self.render_preview()
+            self.refresh_placeholders_list()
 
-    def convert_preview_formulas_to_names(self):
+    def convert_preview_formulas_to_names(self, show_success_popup=True):
         """
         Convert formulas in self.last_rendered_markup using only trivial_names mapping.
         No network lookups.
         """
         markup = getattr(self, "last_rendered_markup", "") or ""
         if not markup.strip():
-            QtWidgets.QMessageBox.information(self, "Nothing", "No rendered text to convert.")
+            if show_success_popup:
+                QtWidgets.QMessageBox.information(self, "Nothing", "No rendered text to convert.")
             return
 
         trivial_map = {k: v for k, v in self.trivial_names.items()}
@@ -1686,7 +2398,8 @@ class MainWindow(QtWidgets.QMainWindow):
                 candidates.append((tok, plain))
 
         if not candidates:
-            QtWidgets.QMessageBox.information(self, "No formulas", "No formula-like tokens found to convert.")
+            if show_success_popup:
+                QtWidgets.QMessageBox.information(self, "No formulas", "No formula-like tokens found to convert.")
             return
 
         # Sort to avoid partial replacements
@@ -1713,47 +2426,100 @@ class MainWindow(QtWidgets.QMainWindow):
             self.update_preview_from_markup(new_markup)
             found_count = sum(1 for v in looked_up.values() if v[0] == "trivial")
             self.statusBar().showMessage(f"Converted {found_count} formula(s) using trivial names", 6000)
-            QtWidgets.QMessageBox.information(self, "Converted", f"Converted {found_count} formula(s) in the preview.")
+            if show_success_popup:
+                QtWidgets.QMessageBox.information(self, "Converted", f"Converted {found_count} formula(s) in the preview.")
         else:
-            QtWidgets.QMessageBox.information(self, "No changes", "No conversions were possible with trivial names.")
+            if show_success_popup:
+                QtWidgets.QMessageBox.information(self, "No changes", "No conversions were possible with trivial names.")
 
     # ---------------------------
-    # Nearest-placeholder drop resolution (unchanged behaviour)
+    # Dropping on a rendered placeholder, including an automatic assignment,
+    # always replaces that placeholder's current mapping.
     # ---------------------------
+
+    def _preview_placeholder_at(self, pos: QtCore.QPoint, allow_fallback=False):
+        doc = self.preview.document()
+        best_ph = None
+        best_dist = float('inf')
+        preview_plain_text = self.preview.toPlainText()
+
+        for ph in getattr(self, "placeholders", []) or []:
+            visible = self.mapping.get(ph, f"{{{ph}}}")
+            if not visible:
+                visible = f"{{{ph}}}"
+            search_text = strip_markup_to_plain_ascii(visible)
+            search_text = remove_subscript_unicode(search_text)
+            if not search_text:
+                search_text = visible
+            search_variants = [search_text]
+            if search_text not in preview_plain_text:
+                search_variants.append(remove_subscript_unicode(visible))
+            for variant in search_variants:
+                if not variant:
+                    continue
+                start = 0
+                while True:
+                    start = preview_plain_text.find(variant, start)
+                    if start < 0:
+                        break
+                    cursor = QtGui.QTextCursor(doc)
+                    cursor.setPosition(start)
+                    cursor.setPosition(start + len(variant), QtGui.QTextCursor.KeepAnchor)
+                    start_cursor = QtGui.QTextCursor(cursor)
+                    start_cursor.clearSelection()
+                    start_cursor.setPosition(start)
+                    end_cursor = QtGui.QTextCursor(cursor)
+                    end_cursor.clearSelection()
+                    end_cursor.setPosition(max(start, start + len(variant) - 1))
+                    rect = self.preview.cursorRect(start_cursor).united(self.preview.cursorRect(end_cursor))
+                    zone = rect.adjusted(-12, -8, 12, 8)
+                    if zone.contains(pos):
+                        dist = 0
+                    else:
+                        center = zone.center()
+                        dx = center.x() - pos.x()
+                        dy = center.y() - pos.y()
+                        dist = math.hypot(dx, dy)
+                    if dist < best_dist:
+                        best_dist = dist
+                        best_ph = ph
+                    start += max(1, len(variant))
+
+        if not best_ph and allow_fallback:
+            all_phs = extract_placeholders(self.current_template)
+            if all_phs:
+                best_ph = all_phs[0]
+        return best_ph
+
+    def on_preview_drag_hovered(self, text: str, pos: QtCore.QPoint):
+        if not getattr(self, "current_template", "") or not text.strip():
+            return
+        # Always resolve against the real mapping so a temporary preview from
+        # the previous position cannot lock the drag to its first target.
+        self.update_preview_from_markup(self._render_markup(self.mapping))
+        self._drag_preview_placeholder = self._preview_placeholder_at(pos)
+        placeholder = self._drag_preview_placeholder
+        if not placeholder or "──" in text:
+            return
+        preview_mapping = dict(self.mapping)
+        preview_mapping[placeholder] = text.strip()
+        self.update_preview_from_markup(
+            self._render_markup(preview_mapping),
+            highlight_mapping=preview_mapping,
+        )
+
+    def clear_preview_drag_hover(self):
+        if getattr(self, "_drag_preview_placeholder", None):
+            self._drag_preview_placeholder = None
+            self.render_preview()
 
     def on_preview_dropped(self, text: str, pos: QtCore.QPoint):
         if not getattr(self, "current_template", ""):
             QtWidgets.QMessageBox.information(self, "No template", "No procedure/template loaded.")
             return
 
-        doc = self.preview.document()
-        best_ph = None
-        best_dist = float('inf')
-
-        for ph in getattr(self, "placeholders", []) or []:
-            visible = self.mapping.get(ph, f"{{{ph}}}")
-            if not visible:
-                visible = f"{{{ph}}}"
-            search_text = remove_subscript_unicode(strip_markup_to_plain_ascii(visible))
-            if not search_text:
-                search_text = visible
-            cursor = doc.find(search_text, 0)
-            while cursor and not cursor.isNull():
-                rect = self.preview.cursorRect(cursor)
-                center = rect.center()
-                dx = center.x() - pos.x()
-                dy = center.y() - pos.y()
-                dist = math.hypot(dx, dy)
-                if dist < best_dist:
-                    best_dist = dist
-                    best_ph = ph
-                start_after = cursor.position() + 1
-                cursor = doc.find(search_text, start_after)
-
-        if not best_ph:
-            all_phs = extract_placeholders(self.current_template)
-            if all_phs:
-                best_ph = all_phs[0]
+        best_ph = getattr(self, "_drag_preview_placeholder", None) or self._preview_placeholder_at(pos)
+        self._drag_preview_placeholder = None
 
         if not best_ph:
             QtWidgets.QMessageBox.information(self, "No placeholders", "No placeholder was found in the template to assign to.")
@@ -1765,13 +2531,17 @@ class MainWindow(QtWidgets.QMainWindow):
                 return
             # push state for undo
             self.push_state()
+            previous_value = self.mapping.get(best_ph)
             if val == "<unassigned>":
                 if best_ph in self.mapping:
                     del self.mapping[best_ph]
             else:
                 self.mapping[best_ph] = val
+                self.automatic_mapping.discard(best_ph)
             self.render_preview()
-            self.statusBar().showMessage(f"Assigned '{val}' to placeholder {{{best_ph}}}", 3000)
+            self.refresh_placeholders_list()
+            action = "Reassigned" if previous_value else "Assigned"
+            self.statusBar().showMessage(f"{action} '{val}' to placeholder {{{best_ph}}}", 3000)
 
 def main():
     app = QtWidgets.QApplication(sys.argv)
